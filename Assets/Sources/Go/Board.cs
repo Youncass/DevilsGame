@@ -1,84 +1,85 @@
-﻿using UnityEngine;
-using UnityEngine.Events;
-using System.Collections;
-using Sources;
+﻿using System;
+using System.Collections.Generic;
+using UnityEngine;
 
 public class Board : MonoBehaviour
 {
-    public int FieldSize => _fieldSize;
-
-    //public UnityEvent<Vector2Int, Vector3, PieceColor> PiecePlaced { get; private set; } = new();
-
-    [SerializeField] private GameObject _whitePiecePrefab;
-    [SerializeField] private GameObject _blackPiecePrefab;
-    [SerializeField] private Camera _mainCamera;
-    [SerializeField] private PlayerInput _input;
     [SerializeField] private Transform _startCellPosition;
     [SerializeField, Min(1)] private int _fieldSize;
     [SerializeField] private float _cellsOffset;
 
-    public IEnumerator PerformMove(PieceColor color)
+    private readonly Dictionary<Vector2Int, PieceColor> _cells = new();
+
+    public int FieldSize => _fieldSize;
+    public float CellsOffset => _cellsOffset;
+    public Vector3 Origin => _startCellPosition.position;
+
+    public event Action<Vector2Int, PieceColor> PiecePlaced;
+
+    public Vector3 CellToWorld(Vector2Int cell)
     {
-        yield return WaitForPlayersMove(color);
+        Vector3 origin = Origin;
+        return new Vector3(
+            origin.x + cell.x * _cellsOffset,
+            origin.y,
+            origin.z + cell.y * _cellsOffset);
     }
 
-    private IEnumerator WaitForPlayersMove(PieceColor color)
+    public Vector2Int WorldToCell(Vector3 world)
     {
-        Plane plane = new(inNormal: Vector2.up,
-                          d: -_startCellPosition.position.y);
-
-        Vector2 position = default;
-        _input.OnClick.AddListener(RegisterClick);
-        yield return new WaitWhile(() => position == default);
-        _input.OnClick.RemoveListener(RegisterClick);
-
-        Ray ray = _mainCamera.ScreenPointToRay(position);
-        if (plane.Raycast(ray, out float enter))
-        {
-            Vector3 enterPoint = ray.GetPoint(enter);
-            if (IsWithinBoard(enterPoint))
-            {
-                enterPoint = SnapToBoard(enterPoint);
-
-                GameObject prefab = color == PieceColor.White ? _whitePiecePrefab : _blackPiecePrefab;
-                Instantiate(prefab, enterPoint, Quaternion.identity, transform);
-            }
-        }
-
-
-        void RegisterClick(Vector2 p) => position = p;
+        Vector3 origin = Origin;
+        int x = Mathf.RoundToInt((world.x - origin.x) / _cellsOffset);
+        int y = Mathf.RoundToInt((world.z - origin.z) / _cellsOffset);
+        return new Vector2Int(x, y);
     }
 
-    private bool IsWithinBoard(Vector3 position)
+    public bool IsInside(Vector2Int cell) =>
+        cell.x >= 0 && cell.x < _fieldSize &&
+        cell.y >= 0 && cell.y < _fieldSize;
+
+    public bool ContainsWorldPoint(Vector3 world)
     {
-        Vector3 scp = _startCellPosition.position;
-        return position.x > scp.x - _cellsOffset &&
-               position.x < scp.x + (_fieldSize - 0.5f) * _cellsOffset &&
-               position.z > scp.z - _cellsOffset &&
-               position.z < scp.z + (_fieldSize - 0.5f) * _cellsOffset;
+        Vector3 origin = Origin;
+        float half = _cellsOffset * 0.5f;
+        return world.x >= origin.x - half &&
+               world.x <= origin.x + (_fieldSize - 1) * _cellsOffset + half &&
+               world.z >= origin.z - half &&
+               world.z <= origin.z + (_fieldSize - 1) * _cellsOffset + half;
     }
 
-    private Vector3 SnapToBoard(Vector3 position)
+    public bool TryPlacePiece(Vector2Int cell, PieceColor color)
     {
-        position.x = (position.x - _startCellPosition.position.x).Snap(_cellsOffset) + _startCellPosition.position.x;
-        position.y = _startCellPosition.position.y;
-        position.z = (position.z - _startCellPosition.position.z).Snap(_cellsOffset) + _startCellPosition.position.z;
-        return position;
+        if (IsInside(cell) == false || _cells.ContainsKey(cell))
+            return false;
+
+        _cells.Add(cell, color);
+        PiecePlaced?.Invoke(cell, color);
+        return true;
     }
 
     private void OnDrawGizmos()
     {
-        Vector3 scp = _startCellPosition.position;
+        if (_startCellPosition == null)
+            return;
 
+        Vector3 origin = Origin;
+        float size = (_fieldSize - 1) * _cellsOffset;
+
+        Gizmos.color = Color.gray;
         for (int i = 0; i < _fieldSize; i++)
         {
+            float offset = i * _cellsOffset;
             Gizmos.DrawLine(
-                from: new(scp.x, scp.y, scp.z + i * _cellsOffset),
-                to: new(scp.x + (_fieldSize - 1) * _cellsOffset, scp.y, scp.z + i * _cellsOffset));
-
+                new Vector3(origin.x, origin.y, origin.z + offset),
+                new Vector3(origin.x + size, origin.y, origin.z + offset));
             Gizmos.DrawLine(
-                from: new(scp.x + i * _cellsOffset, scp.y, scp.z),
-                to: new(scp.x + i * _cellsOffset, scp.y, scp.z + (_fieldSize - 1) * _cellsOffset));
+                new Vector3(origin.x + offset, origin.y, origin.z),
+                new Vector3(origin.x + offset, origin.y, origin.z + size));
         }
+
+        Gizmos.color = Color.yellow;
+        for (int x = 0; x < _fieldSize; x++)
+            for (int y = 0; y < _fieldSize; y++)
+                Gizmos.DrawSphere(CellToWorld(new Vector2Int(x, y)), _cellsOffset * 0.05f);
     }
 }

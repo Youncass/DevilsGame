@@ -4,28 +4,34 @@ using UnityEngine;
 public class GameSystem : MonoBehaviour
 {
     [SerializeField] private Board _board;
-    [SerializeField] private PieceColor _currentTurn;
+    [SerializeField] private PlayerInput _input;
+    [SerializeField] private Camera _mainCamera;
+    [SerializeField] private PieceColor _currentTurn = PieceColor.White;
 
-    private void Start()
+    private PlayerMoveProvider _playerMoves;
+    private BoardRaycaster _raycaster;
+
+    private void Awake()
     {
-        StartRound();
+        _playerMoves = new PlayerMoveProvider(_input, _raycaster);
+        _raycaster = new BoardRaycaster(_mainCamera, _board);
     }
 
-    public void StartRound()
+    private void Start() => StartCoroutine(GameLoop());
+
+    private IEnumerator GameLoop()
     {
-        StartCoroutine(StartRound_Internal());
-
-        IEnumerator StartRound_Internal()
+        while (true)
         {
-            while (true)
-            {
-                yield return _board.PerformMove(_currentTurn);
+            Vector2Int? move = null;
+            yield return _playerMoves.WaitForMove(m => move = m);
 
-                if (_currentTurn == PieceColor.White)
-                    _currentTurn = PieceColor.Black;
-                else
-                    _currentTurn = PieceColor.White;
-            }
+            if (move.HasValue == false || _board.TryPlacePiece(move.Value, _currentTurn) == false)
+                continue;
+
+            _currentTurn = _currentTurn == PieceColor.White
+                ? PieceColor.Black
+                : PieceColor.White;
         }
     }
 }

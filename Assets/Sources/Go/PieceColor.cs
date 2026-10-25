@@ -1,5 +1,5 @@
 ﻿public enum PieceColor : byte
 {
-    Black,
-    White
+    Black = 1,
+    White = 2
 }
