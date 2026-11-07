@@ -15,7 +15,7 @@ public class Board : MonoBehaviour
 
     // Кэш буферов — чтобы не аллоцировать на каждый ход.
     private GoLogic.Buffers _buffers;
-    private bool[] _scoreVisited;
+    private int[] _scoreVisitedStamp;
     private int[] _scoreQueue;
     private float[] _scoreInfluence;
 
@@ -25,6 +25,7 @@ public class Board : MonoBehaviour
     public IReadOnlyList<Stone> Cells => _cells;
     public int CapturedBlack => _capturedBlack;
     public int CapturedWhite => _capturedWhite;
+    public int KoPoint => _koPoint;
 
     public event Action<Vector2Int, PieceColor> PiecePlaced;
     public event Action<IReadOnlyList<Vector2Int>, PieceColor> PiecesCaptured;
@@ -34,7 +35,7 @@ public class Board : MonoBehaviour
         int n = _fieldSize * _fieldSize;
         _cells = new Stone[n];
         _buffers = GoLogic.Buffers.Allocate(_fieldSize);
-        _scoreVisited = new bool[n];
+        _scoreVisitedStamp = new int[n];
         _scoreQueue = new int[n];
         _scoreInfluence = new float[n];
     }
@@ -168,7 +169,7 @@ public class Board : MonoBehaviour
         return GoScore.ComputeBreakdown(
             _cells, _fieldSize, blackStones, whiteStones,
             _capturedBlack, _capturedWhite,
-            _scoreVisited, _scoreQueue, _scoreInfluence);
+            _scoreVisitedStamp, _scoreQueue, _scoreInfluence);
     }
 
     private void OnDrawGizmos()

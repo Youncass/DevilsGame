@@ -48,6 +48,7 @@ public class GameSystem : MonoBehaviour
                     _board.Cells,
                     _currentTurn == PieceColor.Black ? Stone.Black : Stone.White,
                     _botSimulations,
+                    _board.KoPoint,
                     _board.CapturedBlack,
                     _board.CapturedWhite);
 
@@ -55,14 +56,32 @@ public class GameSystem : MonoBehaviour
 
                 if (search.BestMove.x < 0)
                 {
-                    Debug.LogWarning("[Go] Bot has no legal move — pass.");
-                    // TODO: обработать пас
+                    Debug.LogWarning("[Go] Bot has no legal move — pass."); // Пас
+                    _currentTurn = _currentTurn == PieceColor.White
+                        ? PieceColor.Black
+                        : PieceColor.White;
                     continue;
                 }
 
                 if (!_board.TryPlacePiece(search.BestMove, _currentTurn))
                 {
                     Debug.LogError($"[Go] Bot returned illegal move {search.BestMove}");
+
+                    // Fallback: перебираем доску, ищем любой легальный ход через Board.
+                    if (!TryAnyLegalMove(out Vector2Int fallback))
+                    {
+                        Debug.LogWarning("[Go] No legal moves at all — pass.");
+                    }
+                    else
+                    {
+                        _board.TryPlacePiece(fallback, _currentTurn);
+                        Debug.Log($"[Go] Fallback move={fallback}");
+                    }
+
+                    LogScore("after bot (fallback)");
+                    _currentTurn = _currentTurn == PieceColor.White
+                        ? PieceColor.Black
+                        : PieceColor.White;
                     continue;
                 }
 
@@ -76,6 +95,30 @@ public class GameSystem : MonoBehaviour
                 ? PieceColor.Black
                 : PieceColor.White;
         }
+    }
+
+    /// <summary>
+    /// Fallback: найти любой легальный ход через Board.IsLegalMove.
+    /// </summary>
+    private bool TryAnyLegalMove(out Vector2Int move)
+    {
+        var cells = _board.Cells;
+        var buffers = GoLogic.Buffers.Allocate(_board.FieldSize);
+        Stone player = _currentTurn == PieceColor.Black ? Stone.Black : Stone.White;
+
+        for (int y = 0; y < _board.FieldSize; y++)
+        {
+            for (int x = 0; x < _board.FieldSize; x++)
+            {
+                if (GoLogic.IsLegalMove(cells.ToArray(), _board.FieldSize, x, y, player, ref buffers, _board.KoPoint))
+                {
+                    move = new Vector2Int(x, y);
+                    return true;
+                }
+            }
+        }
+        move = new Vector2Int(-1, -1);
+        return false;
     }
 
     private void LogScore(string label)

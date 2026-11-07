@@ -9,30 +9,44 @@ public static class GoScore
         _ => 7.5f,
     };
 
+    /// <summary>
+    /// Вычисляет разбивку счёта. Использует generation-stamp для visited:
+    /// visitedStamp[i] == currentStamp означает «посещено в текущем проходе».
+    /// currentStamp инкрементируется внутри для каждого независимого BFS.
+    /// </summary>
     public static ScoreBreakdown ComputeBreakdown(
-    Stone[] board, int size, int blackStones, int whiteStones,
-    int capturedBlack, int capturedWhite,
-    bool[] visited, int[] queue, float[] influenceBuffer)
+        Stone[] board,
+        int size,
+        int blackStones,
+        int whiteStones,
+        int capturedBlack,
+        int capturedWhite,
+        int[] visitedStamp,
+        int[] queue,
+        float[] influenceBuffer)
     {
         int n = board.Length;
+        // Обнуляем visited — гарантирует чистоту, не полагаемся на внешние метки.
+        System.Array.Clear(visitedStamp, 0, n);
         int blackTerritory = 0;
         int whiteTerritory = 0;
+        int stamp = 1;   // локальный счётчик поколений для этого вызова
 
         // ============================================================
-        // 0. ATARI — СЧИТАЕМ ПЕРВЫМ, до территории (чтобы не зависеть от visited).
+        // 0. Atari — считаем ПЕРВЫМ.
         // ============================================================
         int atariBlack = 0;
         int atariWhite = 0;
 
-        for (int i = 0; i < n; i++) visited[i] = false;
+        stamp++;
         for (int i = 0; i < n; i++)
         {
-            if (board[i] == Stone.Empty || visited[i]) continue;
+            if (board[i] == Stone.Empty || visitedStamp[i] == stamp) continue;
 
             Stone color = board[i];
             int head = 0, tail = 0;
             queue[tail++] = i;
-            visited[i] = true;
+            visitedStamp[i] = stamp;
             int groupSize = 0;
             int liberties = 0;
 
@@ -51,11 +65,14 @@ public static class GoScore
                     int nIdx = ny * size + nx;
 
                     if (board[nIdx] == Stone.Empty) liberties++;
-                    else if (board[nIdx] == color && !visited[nIdx]) { visited[nIdx] = true; queue[tail++] = nIdx; }
+                    else if (board[nIdx] == color && visitedStamp[nIdx] != stamp)
+                    {
+                        visitedStamp[nIdx] = stamp;
+                        queue[tail++] = nIdx;
+                    }
                 }
             }
 
-            // liberties <= 1 — группа в atari (или уже мертва в промежуточном состоянии).
             if (liberties <= 1)
             {
                 if (color == Stone.Black) atariBlack += groupSize;
@@ -66,16 +83,15 @@ public static class GoScore
         // ============================================================
         // 1. Территория через BFS-регионы.
         // ============================================================
-        for (int i = 0; i < n; i++) visited[i] = false;
-
+        stamp++;
         for (int i = 0; i < n; i++)
         {
             if (board[i] != Stone.Empty) { influenceBuffer[i] = 0f; continue; }
-            if (visited[i]) continue;
+            if (visitedStamp[i] == stamp) continue;
 
             int head = 0, tail = 0;
             queue[tail++] = i;
-            visited[i] = true;
+            visitedStamp[i] = stamp;
             int regionCount = 0;
             bool touchesBlack = false;
             bool touchesWhite = false;
@@ -96,7 +112,11 @@ public static class GoScore
 
                     if (board[nIdx] == Stone.Black) touchesBlack = true;
                     else if (board[nIdx] == Stone.White) touchesWhite = true;
-                    else if (!visited[nIdx]) { visited[nIdx] = true; queue[tail++] = nIdx; }
+                    else if (visitedStamp[nIdx] != stamp)
+                    {
+                        visitedStamp[nIdx] = stamp;
+                        queue[tail++] = nIdx;
+                    }
                 }
             }
 
@@ -109,7 +129,7 @@ public static class GoScore
         }
 
         // ============================================================
-        // 2. Influence для спорных клеток.
+        // 2. Influence для спорных клеток (multi-source BFS от камней).
         // ============================================================
         for (int i = 0; i < n; i++)
         {
@@ -118,12 +138,13 @@ public static class GoScore
             influenceBuffer[i] = float.NaN;
         }
 
+        stamp++;
         int head2 = 0, tail2 = 0;
         for (int i = 0; i < n; i++)
         {
             if (board[i] == Stone.Empty) continue;
             queue[tail2++] = i;
-            visited[i] = true;
+            visitedStamp[i] = stamp;
         }
 
         while (head2 < tail2)
@@ -141,9 +162,9 @@ public static class GoScore
                 int nIdx = ny * size + nx;
                 if (board[nIdx] != Stone.Empty) continue;
                 if (float.IsNaN(influenceBuffer[nIdx]) == false) continue;
-                if (visited[nIdx]) continue;
+                if (visitedStamp[nIdx] == stamp) continue;
 
-                visited[nIdx] = true;
+                visitedStamp[nIdx] = stamp;
 
                 float prevDist = board[idx] != Stone.Empty ? 0f : Mathf.Abs(influenceBuffer[idx]);
                 float newDist = prevDist + 1f;
@@ -191,11 +212,11 @@ public static class GoScore
         Stone[] board, int size, Stone player,
         int blackStones, int whiteStones,
         int capturedBlack, int capturedWhite,
-        bool[] visited, int[] queue, float[] influenceBuffer)
+        int[] visitedStamp, int[] queue, float[] influenceBuffer)
     {
         var b = ComputeBreakdown(board, size, blackStones, whiteStones,
                                  capturedBlack, capturedWhite,
-                                 visited, queue, influenceBuffer);
+                                 visitedStamp, queue, influenceBuffer);
         return b.Diff(player);
     }
 }
@@ -208,21 +229,28 @@ public struct ScoreBreakdown
     public int WhiteStones;
     public int CapturedBlack;
     public int CapturedWhite;
-    public int AtariPenaltyBlack;   // камней чёрных в atari (потенциальная потеря)
-    public int AtariPenaltyWhite;   // камней белых в atari
+    public int AtariPenaltyBlack;
+    public int AtariPenaltyWhite;
     public float Komi;
 
-    // Захваты: capturedBlack — захваченные ЧЁРНЫЕ (их взяли белые), идут в счёт БЕЛЫХ.
-    //           capturedWhite — захваченные БЕЛЫЕ (их взяли чёрные), идут в счёт ЧЁРНЫХ.
-    // Atari-штраф вычитается из счёта владельца (он рискует потерять эти камни).
-    public float BlackTotal => BlackTerritory + BlackStones + CapturedWhite - AtariPenaltyBlack * 3;
-    public float WhiteTotal => WhiteTerritory + WhiteStones + CapturedBlack - AtariPenaltyWhite * 3 + Komi;
+    private static float AtariPenalty(int stones)
+    {
+        if (stones <= 0) return 0f;
+        return stones * (5f + 5f / Mathf.Sqrt(stones));
+    }
+
+    public float BlackTotal =>
+        BlackTerritory + BlackStones + CapturedWhite - AtariPenalty(AtariPenaltyBlack);
+    public float WhiteTotal =>
+        WhiteTerritory + WhiteStones + CapturedBlack - AtariPenalty(AtariPenaltyWhite) + Komi;
 
     public float Diff(Stone player) => player == Stone.Black
         ? BlackTotal - WhiteTotal
         : WhiteTotal - BlackTotal;
 
     public override string ToString() =>
-        $"B: terr={BlackTerritory} stones={BlackStones} cap={CapturedWhite} atari=-{AtariPenaltyBlack} => {BlackTotal:0.0} | " +
-        $"W: terr={WhiteTerritory} stones={WhiteStones} cap={CapturedBlack} atari=-{AtariPenaltyWhite} komi={Komi:0.0} => {WhiteTotal:0.0}";
+        $"B: terr={BlackTerritory} stones={BlackStones} cap={CapturedWhite} atari=-{AtariPenaltyBlack} " +
+        $"(pen={AtariPenalty(AtariPenaltyBlack):0.0}) => {BlackTotal:0.0} | " +
+        $"W: terr={WhiteTerritory} stones={WhiteStones} cap={CapturedBlack} atari=-{AtariPenaltyWhite} " +
+        $"(pen={AtariPenalty(AtariPenaltyWhite):0.0}) komi={Komi:0.0} => {WhiteTotal:0.0}";
 }

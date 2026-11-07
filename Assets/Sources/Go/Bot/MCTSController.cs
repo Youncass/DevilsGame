@@ -5,7 +5,7 @@ using UnityEngine;
 public struct MoveSearchResult
 {
     public Vector2Int BestMove;
-    public float BestWinRate;      // на самом деле это score-diff (разница очков)
+    public float BestWinRate;
     public int LegalMoveCount;
     public int Simulations;
     public List<(Vector2Int move, float winRate, int visits)> AllMoves;
@@ -17,11 +17,12 @@ public class MCTSController
     private readonly int _boardCells;
     private readonly System.Random _rng = new();
     private readonly float[] _influenceBuffer;
-    private const float Exploration = 1.414f;
+    private readonly int[] _scoreVisitedStamp;
+    private readonly int[] _scoreQueue;
 
     // GRAVE параметры
-    private const int GraveRefThreshold = 25;   // узел с Visits > порога становится tref
-    private const float GraveBias = 1e-4f;      // bias в формуле β
+    private const int GraveRefThreshold = 25;
+    private const float GraveBias = 1e-4f;
 
     // Переиспользуемые буферы
     private GoLogic.Buffers _buffers;
@@ -32,6 +33,8 @@ public class MCTSController
     {
         _boardSize = boardSize;
         _boardCells = boardSize * boardSize;
+        _scoreVisitedStamp = new int[_boardCells];
+        _scoreQueue = new int[_boardCells];
         _influenceBuffer = new float[_boardCells];
         _buffers = GoLogic.Buffers.Allocate(boardSize);
     }
@@ -40,17 +43,18 @@ public class MCTSController
         IReadOnlyList<Stone> currentBoard,
         Stone player,
         int simulations,
+        int koPoint,
         int capturedBlack = 0,
         int capturedWhite = 0)
     {
         int n = _boardCells;
         Stone[] rootBoard = currentBoard.ToArray();
 
-        // 1. Собираем легальные ходы корня.
+        // 1. Собираем легальные ходы корня — С УЧЁТОМ КО.
         var legalMoves = new List<(int x, int y)>();
         for (int y = 0; y < _boardSize; y++)
             for (int x = 0; x < _boardSize; x++)
-                if (GoLogic.IsLegalMove(rootBoard, _boardSize, x, y, player, ref _buffers))
+                if (GoLogic.IsLegalMove(rootBoard, _boardSize, x, y, player, ref _buffers, koPoint))
                     legalMoves.Add((x, y));
 
         if (legalMoves.Count == 0)
@@ -67,7 +71,6 @@ public class MCTSController
             };
         }
 
-        // 2. Считаем камни.
         int blackStones = 0, whiteStones = 0;
         for (int k = 0; k < n; k++)
         {
@@ -78,7 +81,7 @@ public class MCTSController
         var root = new MCTSNode(null, -1, -1, n)
         {
             PlayerToMove = player,
-            KoPoint = -1,
+            KoPoint = koPoint,
             LastMoveX = -1,
             LastMoveY = -1,
             CapturedBlack = capturedBlack,
@@ -88,35 +91,46 @@ public class MCTSController
             ExpandedMoves = new bool[n],
         };
 
-        // 3. Основной цикл MCTS.
         for (int i = 0; i < simulations; i++)
         {
             Stone[] simBoard = (Stone[])rootBoard.Clone();
 
-            MCTSNode leaf = SelectAndExpand(root, simBoard, player);
+            var (leaf, tref) = SelectAndExpand(root, simBoard, player);
 
             float score = Rollout(simBoard, leaf, player, _rolloutMovesScratch);
 
-            // Backpropagation с AMAF
+            // === Backpropagation ===
+            // 1. Путь дерева: Visits/TotalScore + AMAF для ходов НА ПУТИ (дёшево).
             MCTSNode node = leaf;
             while (node != null)
             {
                 node.Visits++;
                 node.TotalScore += score;
 
-                // Обновляем AMAF по всем ходам симуляции.
-                for (int m = 0; m < _rolloutMovesScratch.Count; m++)
+                // Обновляем AMAF для хода, который привёл в этот узел.
+                // Для корня (MoveX == -1) хода нет — пропускаем.
+                if (node.MoveX >= 0)
                 {
-                    int moveIdx = _rolloutMovesScratch[m];
+                    int moveIdx = node.MoveY * _boardSize + node.MoveX;
                     node.AmafVisits[moveIdx]++;
                     node.AmafScore[moveIdx] += score;
                 }
 
                 node = node.Parent;
             }
+
+            // 2. tref: AMAF для всех ходов rollout'а (дорого, но только один узел).
+            if (tref != null && tref != leaf)
+            {
+                for (int m = 0; m < _rolloutMovesScratch.Count; m++)
+                {
+                    int moveIdx = _rolloutMovesScratch[m];
+                    tref.AmafVisits[moveIdx]++;
+                    tref.AmafScore[moveIdx] += score;
+                }
+            }
         }
 
-        // 4. Robust child: лучший ход по Visits.
         MCTSNode bestChild = null;
         int bestVisits = -1;
         var all = new List<(Vector2Int, float, int)>(root.Children.Count);
@@ -142,22 +156,17 @@ public class MCTSController
         };
     }
 
-    /// <summary>
-    /// Спуск по дереву с GRAVE-выбором.
-    /// rootPlayer — цвет корневого игрока (для negamax-инверсии в узлах противника).
-    /// </summary>
-    private MCTSNode SelectAndExpand(MCTSNode root, Stone[] board, Stone rootPlayer)
+    private (MCTSNode leaf, MCTSNode tref) SelectAndExpand(
+        MCTSNode root, Stone[] board, Stone rootPlayer)
     {
         MCTSNode node = root;
-        MCTSNode tref = root; // предок, чьи AMAF используем
+        MCTSNode tref = root;
 
         while (true)
         {
-            // Обновляем tref: если узел достаточно посещён, его AMAF надёжнее.
             if (node.Visits > GraveRefThreshold)
                 tref = node;
 
-            // 1. Раскрытие: ищем нераскрытые легальные ходы.
             _unexpandedScratch.Clear();
             if (node.ExpandedMoves == null)
                 node.ExpandedMoves = new bool[_boardCells];
@@ -182,10 +191,9 @@ public class MCTSController
                 node.Children.Add(chosen);
                 node.ExpandedMoves[chosen.MoveY * _boardSize + chosen.MoveX] = true;
                 ApplyMoveIntoNode(board, chosen);
-                return chosen;
+                return (chosen, tref);
             }
 
-            // 2. GRAVE-выбор лучшего ребёнка.
             MCTSNode bestChild = null;
             float bestValue = float.NegativeInfinity;
             bool isOpponentNode = node.PlayerToMove != rootPlayer;
@@ -207,7 +215,6 @@ public class MCTSController
 
                 float value = (1f - beta) * mean + beta * amaf;
 
-                // Negamax: в узле противника инвертируем.
                 if (isOpponentNode) value = -value;
 
                 if (value > bestValue)
@@ -225,9 +232,6 @@ public class MCTSController
         }
     }
 
-    /// <summary>
-    /// Применяет ход узла к доске, наследуя счётчики из родителя.
-    /// </summary>
     private void ApplyMoveIntoNode(Stone[] board, MCTSNode node)
     {
         int capB = node.Parent.CapturedBlack;
@@ -251,9 +255,6 @@ public class MCTSController
         node.PlayerToMove = node.PlayerToMove == Stone.Black ? Stone.White : Stone.Black;
     }
 
-    /// <summary>
-    /// Rollout с записью всех ходов в movesOut (для AMAF).
-    /// </summary>
     private float Rollout(Stone[] board, MCTSNode leaf, Stone rootPlayer, List<int> movesOut)
     {
         movesOut.Clear();
@@ -271,7 +272,7 @@ public class MCTSController
 
         bool playerPassed = false;
         bool opponentPassed = false;
-        int maxMoves = n * 2;
+        int maxMoves = n + 20;   // было n * 2 — обрезаем для скорости
         int moves = 0;
 
         while (moves < maxMoves && !(playerPassed && opponentPassed))
@@ -299,7 +300,7 @@ public class MCTSController
         }
 
         return GoScore.Evaluate(board, _boardSize, rootPlayer,
-                                blackStones, whiteStones, capB, capW,
-                                _buffers.Visited, _buffers.Queue, _influenceBuffer);
+                        blackStones, whiteStones, capB, capW,
+                        _scoreVisitedStamp, _scoreQueue, _influenceBuffer);
     }
 }
