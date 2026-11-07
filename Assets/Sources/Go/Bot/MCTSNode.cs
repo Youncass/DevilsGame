@@ -11,28 +11,34 @@ public class MCTSNode
     public int Visits;
     public float TotalScore;
 
-    // Состояние, в котором находится узел (ПОСЛЕ хода, приведшего в узел).
-    // Для корня — начальное состояние.
-    public Stone PlayerToMove;          // кто ходит ИЗ этого узла
-    public int KoPoint;                 // ko-запрет для хода из этого узла
+    // === AMAF статистика ===
+    // AmafVisits[moveIdx]  — сколько раз ход moveIdx встречался в симуляциях,
+    //                        прошедших через этот узел.
+    // AmafScore[moveIdx]   — суммарная оценка (с точки зрения корневого игрока)
+    //                        для этих симуляций.
+    public int[] AmafVisits;
+    public float[] AmafScore;
+
+    // Состояние в узле
+    public Stone PlayerToMove;
+    public int KoPoint;
     public int LastMoveX = -1;
     public int LastMoveY = -1;
-    public int CapturedBlack;           // накопленные захваты чёрных (белыми) с начала партии
-    public int CapturedWhite;           // накопленные захваты белых (чёрными)
-    public int BlackStones;             // камней на доске
+    public int CapturedBlack;
+    public int CapturedWhite;
+    public int BlackStones;
     public int WhiteStones;
-
-    // Кэш легальных ходов из этого узла (вычисляется лениво при первом раскрытии).
-    // null = ещё не вычисляли.
-    public bool[] ExpandedMoves;        // размер n: true = уже добавлен в Children
+    public bool[] ExpandedMoves;
 
     public float WinRate => Visits > 0 ? TotalScore / Visits : 0f;
 
-    public MCTSNode(MCTSNode parent, int moveX, int moveY)
+    public MCTSNode(MCTSNode parent, int moveX, int moveY, int boardCells)
     {
         Parent = parent;
         MoveX = moveX;
         MoveY = moveY;
+        AmafVisits = new int[boardCells];
+        AmafScore = new float[boardCells];
     }
 
     public bool IsFullyExpanded(int maxChildren)

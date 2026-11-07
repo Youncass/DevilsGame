@@ -536,7 +536,7 @@ MonoBehaviour:
   _input: {fileID: 424579386}
   _mainCamera: {fileID: 330585545}
   _currentTurn: 2
-  _botSimulations: 5000
+  _botSimulations: 2000
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0

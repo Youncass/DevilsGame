@@ -105,7 +105,7 @@ public class GameSystem : MonoBehaviour
         }
 
         Debug.Log(
-            $"[Bot] move={r.BestMove} score={r.BestScore:+0.00;-0.00;0.00} " +
+            $"[Bot] move={r.BestMove} score={r.BestWinRate:+0.00;-0.00;0.00} " +
             $"sims={r.Simulations} totalLegal={r.LegalMoveCount} time={ms}ms\n" +
             $"      2nd={(secondIdx >= 0 ? $"{visitedMoves[secondIdx].move} wr={second:+0.00;-0.00;0.00}" : "—")} " +
             $"worst={(worstIdx >= 0 ? $"{visitedMoves[worstIdx].move} wr={worst:+0.00;-0.00;0.00}" : "—")}");
