@@ -9,44 +9,34 @@ public static class GoScore
         _ => 7.5f,
     };
 
-    /// <summary>
-    /// Вычисляет разбивку счёта. Использует generation-stamp для visited:
-    /// visitedStamp[i] == currentStamp означает «посещено в текущем проходе».
-    /// currentStamp инкрементируется внутри для каждого независимого BFS.
-    /// </summary>
-    public static ScoreBreakdown ComputeBreakdown(
-        Stone[] board,
-        int size,
-        int blackStones,
-        int whiteStones,
-        int capturedBlack,
-        int capturedWhite,
-        int[] visitedStamp,
-        int[] queue,
-        float[] influenceBuffer)
+    public static ScoreBreakdown ComputeBreakdown(ref GameState state)
     {
-        int n = board.Length;
-        // Обнуляем visited — гарантирует чистоту, не полагаемся на внешние метки.
-        System.Array.Clear(visitedStamp, 0, n);
+        int size = state.Size;
+        int n = state.Cells.Length;
+        Stone[] board = state.Cells;
+        int[] queue = state.Buffers.Queue;
+        int[] stamp = state.Buffers.VisitedStamp;
+        float[] influence = state.InfluenceBuffer;
+
         int blackTerritory = 0;
         int whiteTerritory = 0;
-        int stamp = 1;   // локальный счётчик поколений для этого вызова
 
         // ============================================================
-        // 0. Atari — считаем ПЕРВЫМ.
+        // 0. Atari — первым.
         // ============================================================
         int atariBlack = 0;
         int atariWhite = 0;
 
-        stamp++;
+        state.Buffers.NextStamp();
+        int cur = state.Buffers.CurrentStamp;
         for (int i = 0; i < n; i++)
         {
-            if (board[i] == Stone.Empty || visitedStamp[i] == stamp) continue;
+            if (board[i] == Stone.Empty || stamp[i] == cur) continue;
 
             Stone color = board[i];
             int head = 0, tail = 0;
             queue[tail++] = i;
-            visitedStamp[i] = stamp;
+            stamp[i] = cur;
             int groupSize = 0;
             int liberties = 0;
 
@@ -65,9 +55,9 @@ public static class GoScore
                     int nIdx = ny * size + nx;
 
                     if (board[nIdx] == Stone.Empty) liberties++;
-                    else if (board[nIdx] == color && visitedStamp[nIdx] != stamp)
+                    else if (board[nIdx] == color && stamp[nIdx] != cur)
                     {
-                        visitedStamp[nIdx] = stamp;
+                        stamp[nIdx] = cur;
                         queue[tail++] = nIdx;
                     }
                 }
@@ -83,15 +73,16 @@ public static class GoScore
         // ============================================================
         // 1. Территория через BFS-регионы.
         // ============================================================
-        stamp++;
+        state.Buffers.NextStamp();
+        cur = state.Buffers.CurrentStamp;
         for (int i = 0; i < n; i++)
         {
-            if (board[i] != Stone.Empty) { influenceBuffer[i] = 0f; continue; }
-            if (visitedStamp[i] == stamp) continue;
+            if (board[i] != Stone.Empty) continue;
+            if (stamp[i] == cur) continue;
 
             int head = 0, tail = 0;
             queue[tail++] = i;
-            visitedStamp[i] = stamp;
+            stamp[i] = cur;
             int regionCount = 0;
             bool touchesBlack = false;
             bool touchesWhite = false;
@@ -112,20 +103,16 @@ public static class GoScore
 
                     if (board[nIdx] == Stone.Black) touchesBlack = true;
                     else if (board[nIdx] == Stone.White) touchesWhite = true;
-                    else if (visitedStamp[nIdx] != stamp)
+                    else if (stamp[nIdx] != cur)
                     {
-                        visitedStamp[nIdx] = stamp;
+                        stamp[nIdx] = cur;
                         queue[tail++] = nIdx;
                     }
                 }
             }
 
-            int ownerSign = 0;
-            if (touchesBlack && !touchesWhite) { blackTerritory += regionCount; ownerSign = 1; }
-            else if (touchesWhite && !touchesBlack) { whiteTerritory += regionCount; ownerSign = -1; }
-
-            for (int k = 0; k < tail; k++)
-                influenceBuffer[queue[k]] = ownerSign;
+            if (touchesBlack && !touchesWhite) blackTerritory += regionCount;
+            else if (touchesWhite && !touchesBlack) whiteTerritory += regionCount;
         }
 
         // ============================================================
@@ -133,18 +120,18 @@ public static class GoScore
         // ============================================================
         for (int i = 0; i < n; i++)
         {
-            if (board[i] != Stone.Empty) { influenceBuffer[i] = 0f; continue; }
-            if (influenceBuffer[i] != 0f) continue;
-            influenceBuffer[i] = float.NaN;
+            if (board[i] != Stone.Empty) { influence[i] = 0f; continue; }
+            influence[i] = float.NaN;
         }
 
-        stamp++;
+        state.Buffers.NextStamp();
+        cur = state.Buffers.CurrentStamp;
         int head2 = 0, tail2 = 0;
         for (int i = 0; i < n; i++)
         {
             if (board[i] == Stone.Empty) continue;
             queue[tail2++] = i;
-            visitedStamp[i] = stamp;
+            stamp[i] = cur;
         }
 
         while (head2 < tail2)
@@ -161,15 +148,15 @@ public static class GoScore
                 if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
                 int nIdx = ny * size + nx;
                 if (board[nIdx] != Stone.Empty) continue;
-                if (float.IsNaN(influenceBuffer[nIdx]) == false) continue;
-                if (visitedStamp[nIdx] == stamp) continue;
+                if (!float.IsNaN(influence[nIdx])) continue;
+                if (stamp[nIdx] == cur) continue;
 
-                visitedStamp[nIdx] = stamp;
+                stamp[nIdx] = cur;
 
-                float prevDist = board[idx] != Stone.Empty ? 0f : Mathf.Abs(influenceBuffer[idx]);
+                float prevDist = board[idx] != Stone.Empty ? 0f : Mathf.Abs(influence[idx]);
                 float newDist = prevDist + 1f;
                 float sign = stone == Stone.Black ? 1f : -1f;
-                influenceBuffer[nIdx] = sign * newDist;
+                influence[nIdx] = sign * newDist;
                 queue[tail2++] = nIdx;
             }
         }
@@ -177,10 +164,10 @@ public static class GoScore
         for (int i = 0; i < n; i++)
         {
             if (board[i] != Stone.Empty) continue;
-            if (float.IsNaN(influenceBuffer[i])) { influenceBuffer[i] = 0f; continue; }
-            if (Mathf.Abs(influenceBuffer[i]) == 1f) continue;
+            if (float.IsNaN(influence[i])) continue;
+            if (Mathf.Abs(influence[i]) == 1f) continue; // уже территория
 
-            float v = influenceBuffer[i];
+            float v = influence[i];
             float dist = Mathf.Abs(v);
             float sign = Mathf.Sign(v);
 
@@ -191,33 +178,24 @@ public static class GoScore
             }
         }
 
-        for (int i = 0; i < n; i++)
-            if (float.IsNaN(influenceBuffer[i])) influenceBuffer[i] = 0f;
-
         return new ScoreBreakdown
         {
             BlackTerritory = blackTerritory,
             WhiteTerritory = whiteTerritory,
-            BlackStones = blackStones,
-            WhiteStones = whiteStones,
-            CapturedBlack = capturedBlack,
-            CapturedWhite = capturedWhite,
+            BlackStones = state.BlackStones,
+            WhiteStones = state.WhiteStones,
+            CapturedBlack = state.CapturedBlack,
+            CapturedWhite = state.CapturedWhite,
             AtariPenaltyBlack = atariBlack,
             AtariPenaltyWhite = atariWhite,
             Komi = Komi(size),
         };
     }
 
-    public static float Evaluate(
-        Stone[] board, int size, Stone player,
-        int blackStones, int whiteStones,
-        int capturedBlack, int capturedWhite,
-        int[] visitedStamp, int[] queue, float[] influenceBuffer)
+    public static float Evaluate(ref GameState state, Stone rootPlayer)
     {
-        var b = ComputeBreakdown(board, size, blackStones, whiteStones,
-                                 capturedBlack, capturedWhite,
-                                 visitedStamp, queue, influenceBuffer);
-        return b.Diff(player);
+        var b = ComputeBreakdown(ref state);
+        return b.Diff(rootPlayer);
     }
 }
 

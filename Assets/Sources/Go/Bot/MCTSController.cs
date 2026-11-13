@@ -1,5 +1,4 @@
 ﻿using System.Collections.Generic;
-using System.Linq;
 using UnityEngine;
 
 public struct MoveSearchResult
@@ -16,16 +15,9 @@ public class MCTSController
     private readonly int _boardSize;
     private readonly int _boardCells;
     private readonly System.Random _rng = new();
-    private readonly float[] _influenceBuffer;
-    private readonly int[] _scoreVisitedStamp;
-    private readonly int[] _scoreQueue;
-
-    // GRAVE параметры
     private const int GraveRefThreshold = 25;
     private const float GraveBias = 1e-4f;
 
-    // Переиспользуемые буферы
-    private GoLogic.Buffers _buffers;
     private readonly List<MCTSNode> _unexpandedScratch = new();
     private readonly List<int> _rolloutMovesScratch = new();
 
@@ -33,10 +25,6 @@ public class MCTSController
     {
         _boardSize = boardSize;
         _boardCells = boardSize * boardSize;
-        _scoreVisitedStamp = new int[_boardCells];
-        _scoreQueue = new int[_boardCells];
-        _influenceBuffer = new float[_boardCells];
-        _buffers = GoLogic.Buffers.Allocate(boardSize);
     }
 
     public MoveSearchResult Search(
@@ -44,17 +32,25 @@ public class MCTSController
         Stone player,
         int simulations,
         int koPoint,
+        MoveTechnique rolloutTechniques,
+        MoveTechnique rootTechniques,
         int capturedBlack = 0,
         int capturedWhite = 0)
     {
         int n = _boardCells;
-        Stone[] rootBoard = currentBoard.ToArray();
+        Stone[] rootCells = new Stone[n];
+        for (int i = 0; i < n; i++) rootCells[i] = currentBoard[i];
 
-        // 1. Собираем легальные ходы корня — С УЧЁТОМ КО.
+        var rootState = GameState.Create(rootCells, _boardSize, player);
+        rootState.KoPoint = koPoint;
+        rootState.CapturedBlack = capturedBlack;
+        rootState.CapturedWhite = capturedWhite;
+
+        // Собираем легальные ходы корня.
         var legalMoves = new List<(int x, int y)>();
         for (int y = 0; y < _boardSize; y++)
             for (int x = 0; x < _boardSize; x++)
-                if (GoLogic.IsLegalMove(rootBoard, _boardSize, x, y, player, ref _buffers, koPoint))
+                if (GoLogic.IsLegalMove(ref rootState, x, y))
                     legalMoves.Add((x, y));
 
         if (legalMoves.Count == 0)
@@ -71,44 +67,30 @@ public class MCTSController
             };
         }
 
-        int blackStones = 0, whiteStones = 0;
-        for (int k = 0; k < n; k++)
-        {
-            if (rootBoard[k] == Stone.Black) blackStones++;
-            else if (rootBoard[k] == Stone.White) whiteStones++;
-        }
-
         var root = new MCTSNode(null, -1, -1, n)
         {
-            PlayerToMove = player,
-            KoPoint = koPoint,
-            LastMoveX = -1,
-            LastMoveY = -1,
-            CapturedBlack = capturedBlack,
-            CapturedWhite = capturedWhite,
-            BlackStones = blackStones,
-            WhiteStones = whiteStones,
             ExpandedMoves = new bool[n],
         };
 
         for (int i = 0; i < simulations; i++)
         {
-            Stone[] simBoard = (Stone[])rootBoard.Clone();
+            // Нет клона! Работаем с rootState напрямую.
+            var simState = rootState;
+            simState.SaveScalars();
 
-            var (leaf, tref) = SelectAndExpand(root, simBoard, player);
+            var (leaf, tref) = SelectAndExpand(root, ref simState, player);
 
-            float score = Rollout(simBoard, leaf, player, _rolloutMovesScratch);
+            float score = Rollout(ref simState, leaf, player, _rolloutMovesScratch, rolloutTechniques);
 
-            // === Backpropagation ===
-            // 1. Путь дерева: Visits/TotalScore + AMAF для ходов НА ПУТИ (дёшево).
+            // Откат всех ходов симуляции.
+            simState.UndoLastMove();
+
             MCTSNode node = leaf;
             while (node != null)
             {
                 node.Visits++;
                 node.TotalScore += score;
 
-                // Обновляем AMAF для хода, который привёл в этот узел.
-                // Для корня (MoveX == -1) хода нет — пропускаем.
                 if (node.MoveX >= 0)
                 {
                     int moveIdx = node.MoveY * _boardSize + node.MoveX;
@@ -119,7 +101,6 @@ public class MCTSController
                 node = node.Parent;
             }
 
-            // 2. tref: AMAF для всех ходов rollout'а (дорого, но только один узел).
             if (tref != null && tref != leaf)
             {
                 for (int m = 0; m < _rolloutMovesScratch.Count; m++)
@@ -131,6 +112,38 @@ public class MCTSController
             }
         }
 
+        // === Эвристический бонус за спасение из atari ===
+        // Для каждого ребёнка корня проверяем: если у корня была atari-группа,
+        // спасает ли этот ход её? Если да — бонус; если нет — штраф.
+        // Это даёт MCTS прямой сигнал: «спасай свои группы».
+
+        const int AtariSaveBonus = 50;
+        const int AtariIgnorePenalty = 30;
+
+        var rootStateForCheck = rootState;
+        bool rootHasAtari = GoLogic.HasAnyGroupInAtari(ref rootStateForCheck, player);
+
+        int saveX = -1, saveY = -1;
+        bool hasSaveMove = rootHasAtari && GoLogic.FindAtariEscape(ref rootStateForCheck, out saveX, out saveY);
+
+        // Сначала копируем реальные Visits в EffectiveVisits.
+        foreach (var child in root.Children)
+            child.EffectiveVisits = child.Visits;
+
+        // Применяем бонусы.
+        if (rootHasAtari)
+        {
+            foreach (var child in root.Children)
+            {
+                bool isSaveMove = hasSaveMove && child.MoveX == saveX && child.MoveY == saveY;
+                if (isSaveMove)
+                    child.EffectiveVisits += AtariSaveBonus;
+                else
+                    child.EffectiveVisits = Mathf.Max(0, child.EffectiveVisits - AtariIgnorePenalty);
+            }
+        }
+
+        // Выбор best по EffectiveVisits.
         MCTSNode bestChild = null;
         int bestVisits = -1;
         var all = new List<(Vector2Int, float, int)>(root.Children.Count);
@@ -139,9 +152,9 @@ public class MCTSController
         {
             float wr = child.Visits > 0 ? child.TotalScore / child.Visits : -999f;
             all.Add((new Vector2Int(child.MoveX, child.MoveY), wr, child.Visits));
-            if (child.Visits > bestVisits)
+            if (child.EffectiveVisits > bestVisits)
             {
-                bestVisits = child.Visits;
+                bestVisits = child.EffectiveVisits;
                 bestChild = child;
             }
         }
@@ -157,10 +170,11 @@ public class MCTSController
     }
 
     private (MCTSNode leaf, MCTSNode tref) SelectAndExpand(
-        MCTSNode root, Stone[] board, Stone rootPlayer)
+        MCTSNode root, ref GameState board, Stone rootPlayer)
     {
         MCTSNode node = root;
         MCTSNode tref = root;
+        int depth = 0;
 
         while (true)
         {
@@ -177,7 +191,7 @@ public class MCTSController
                 {
                     int idx = y * _boardSize + x;
                     if (node.ExpandedMoves[idx]) continue;
-                    if (GoLogic.IsLegalMove(board, _boardSize, x, y, node.PlayerToMove, ref _buffers, node.KoPoint))
+                    if (GoLogic.IsLegalMove(ref board, x, y))
                     {
                         var candidate = new MCTSNode(node, x, y, _boardCells);
                         _unexpandedScratch.Add(candidate);
@@ -190,13 +204,17 @@ public class MCTSController
                 var chosen = _unexpandedScratch[_rng.Next(_unexpandedScratch.Count)];
                 node.Children.Add(chosen);
                 node.ExpandedMoves[chosen.MoveY * _boardSize + chosen.MoveX] = true;
-                ApplyMoveIntoNode(board, chosen);
+
+                GoLogic.ApplyMove(ref board, chosen.MoveX, chosen.MoveY, out _);
+
+                // SnapshotForNode убран — узел не хранит State.
                 return (chosen, tref);
             }
 
             MCTSNode bestChild = null;
             float bestValue = float.NegativeInfinity;
-            bool isOpponentNode = node.PlayerToMove != rootPlayer;
+            // Negamax через чётность глубины, а не через node.State.PlayerToMove.
+            bool isOpponentNode = (depth % 2) == 1;
 
             foreach (var child in node.Children)
             {
@@ -206,15 +224,13 @@ public class MCTSController
 
                 float amaf = 0f;
                 int pAmaf = tref.AmafVisits[moveIdx];
-                if (pAmaf > 0)
-                    amaf = tref.AmafScore[moveIdx] / pAmaf;
+                if (pAmaf > 0) amaf = tref.AmafScore[moveIdx] / pAmaf;
 
                 float beta = 0f;
                 if (pAmaf > 0)
                     beta = pAmaf / (pAmaf + child.Visits + GraveBias * pAmaf * child.Visits);
 
                 float value = (1f - beta) * mean + beta * amaf;
-
                 if (isOpponentNode) value = -value;
 
                 if (value > bestValue)
@@ -227,80 +243,47 @@ public class MCTSController
             if (bestChild == null && node.Children.Count > 0)
                 bestChild = node.Children[0];
 
-            ApplyMoveIntoNode(board, bestChild);
+            GoLogic.ApplyMove(ref board, bestChild.MoveX, bestChild.MoveY, out _);
             node = bestChild;
+            depth++;
         }
     }
 
-    private void ApplyMoveIntoNode(Stone[] board, MCTSNode node)
-    {
-        int capB = node.Parent.CapturedBlack;
-        int capW = node.Parent.CapturedWhite;
-        int bStones = node.Parent.BlackStones;
-        int wStones = node.Parent.WhiteStones;
-
-        int newKo = GoLogic.ApplyMove(
-            board, _boardSize, node.MoveX, node.MoveY, node.PlayerToMove,
-            ref _buffers,
-            ref capB, ref capW, ref bStones, ref wStones,
-            out _);
-
-        node.KoPoint = newKo;
-        node.LastMoveX = node.MoveX;
-        node.LastMoveY = node.MoveY;
-        node.CapturedBlack = capB;
-        node.CapturedWhite = capW;
-        node.BlackStones = bStones;
-        node.WhiteStones = wStones;
-        node.PlayerToMove = node.PlayerToMove == Stone.Black ? Stone.White : Stone.Black;
-    }
-
-    private float Rollout(Stone[] board, MCTSNode leaf, Stone rootPlayer, List<int> movesOut)
+    private float Rollout(ref GameState board, MCTSNode leaf, Stone rootPlayer, List<int> movesOut, MoveTechnique techniques)
     {
         movesOut.Clear();
 
         int n = _boardCells;
-        Stone current = leaf.PlayerToMove;
-        int koPoint = leaf.KoPoint;
-        int lastX = leaf.LastMoveX;
-        int lastY = leaf.LastMoveY;
-
-        int capB = leaf.CapturedBlack;
-        int capW = leaf.CapturedWhite;
-        int blackStones = leaf.BlackStones;
-        int whiteStones = leaf.WhiteStones;
+        int maxMoves = n + 10;
+        int moves = 0;
 
         bool playerPassed = false;
         bool opponentPassed = false;
-        int maxMoves = n + 20;   // было n * 2 — обрезаем для скорости
-        int moves = 0;
+
+        int lastX = leaf.MoveX;
+        int lastY = leaf.MoveY;
 
         while (moves < maxMoves && !(playerPassed && opponentPassed))
         {
-            if (GoLogic.SmartRandomMove(board, _boardSize, current, ref _buffers, _rng,
-                                        koPoint, lastX, lastY, 0.4f, out int bx, out int by))
+            if (GoLogic.SmartRandomMove(ref board, _rng, lastX, lastY, 0f,
+                techniques, out int bx, out int by))
             {
                 movesOut.Add(by * _boardSize + bx);
-
-                koPoint = GoLogic.ApplyMove(board, _boardSize, bx, by, current, ref _buffers,
-                                            ref capB, ref capW, ref blackStones, ref whiteStones, out _);
+                GoLogic.ApplyMove(ref board, bx, by, out _);
                 lastX = bx; lastY = by;
-                if (current == rootPlayer) playerPassed = false;
+                if (board.PlayerToMove == rootPlayer) playerPassed = false;
                 else opponentPassed = false;
             }
             else
             {
-                koPoint = -1;
-                if (current == rootPlayer) playerPassed = true;
+                board.KoPoint = -1;
+                board.PlayerToMove = board.PlayerToMove == Stone.Black ? Stone.White : Stone.Black;
+                if (board.PlayerToMove == rootPlayer) playerPassed = true;
                 else opponentPassed = true;
             }
-
-            current = current == Stone.Black ? Stone.White : Stone.Black;
             moves++;
         }
 
-        return GoScore.Evaluate(board, _boardSize, rootPlayer,
-                        blackStones, whiteStones, capB, capW,
-                        _scoreVisitedStamp, _scoreQueue, _influenceBuffer);
+        return GoScore.Evaluate(ref board, rootPlayer);
     }
 }

@@ -10,24 +10,11 @@ public class MCTSNode
 
     public int Visits;
     public float TotalScore;
+    public int EffectiveVisits;
 
-    // === AMAF статистика ===
-    // AmafVisits[moveIdx]  — сколько раз ход moveIdx встречался в симуляциях,
-    //                        прошедших через этот узел.
-    // AmafScore[moveIdx]   — суммарная оценка (с точки зрения корневого игрока)
-    //                        для этих симуляций.
     public int[] AmafVisits;
     public float[] AmafScore;
 
-    // Состояние в узле
-    public Stone PlayerToMove;
-    public int KoPoint;
-    public int LastMoveX = -1;
-    public int LastMoveY = -1;
-    public int CapturedBlack;
-    public int CapturedWhite;
-    public int BlackStones;
-    public int WhiteStones;
     public bool[] ExpandedMoves;
 
     public float WinRate => Visits > 0 ? TotalScore / Visits : 0f;
@@ -39,10 +26,5 @@ public class MCTSNode
         MoveY = moveY;
         AmafVisits = new int[boardCells];
         AmafScore = new float[boardCells];
-    }
-
-    public bool IsFullyExpanded(int maxChildren)
-    {
-        return Children.Count >= maxChildren;
     }
 }

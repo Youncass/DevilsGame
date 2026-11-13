@@ -1,5 +1,4 @@
 using System.Collections;
-using System.Linq;
 using UnityEngine;
 
 public class GameSystem : MonoBehaviour
@@ -8,7 +7,11 @@ public class GameSystem : MonoBehaviour
     [SerializeField] private PlayerInput _input;
     [SerializeField] private Camera _mainCamera;
     [SerializeField] private PieceColor _currentTurn = PieceColor.White;
-    [SerializeField, Min(1)] private int _botSimulations = 500;
+
+    [Header("Bot Settings")]
+    [SerializeField, Min(1)] private int _botSimulations = 5000;
+    [SerializeField] private MoveTechnique _rolloutTechniques = MoveTechnique.FastRollout;
+    [SerializeField] private MoveTechnique _rootTechniques = MoveTechnique.FullRoot;
 
     private BoardRaycaster _raycaster;
     private PlayerMoveProvider _playerMoves;
@@ -49,6 +52,8 @@ public class GameSystem : MonoBehaviour
                     _currentTurn == PieceColor.Black ? Stone.Black : Stone.White,
                     _botSimulations,
                     _board.KoPoint,
+                    _rolloutTechniques,
+                    _rootTechniques,
                     _board.CapturedBlack,
                     _board.CapturedWhite);
 
@@ -56,7 +61,7 @@ public class GameSystem : MonoBehaviour
 
                 if (search.BestMove.x < 0)
                 {
-                    Debug.LogWarning("[Go] Bot has no legal move — pass."); // Пас
+                    Debug.LogWarning("[Go] Bot has no legal move — pass.");
                     _currentTurn = _currentTurn == PieceColor.White
                         ? PieceColor.Black
                         : PieceColor.White;
@@ -65,19 +70,14 @@ public class GameSystem : MonoBehaviour
 
                 if (!_board.TryPlacePiece(search.BestMove, _currentTurn))
                 {
-                    Debug.LogError($"[Go] Bot returned illegal move {search.BestMove}");
-
-                    // Fallback: перебираем доску, ищем любой легальный ход через Board.
+                    Debug.LogError($"[Go] Bot returned illegal move {search.BestMove}. Fallback to any legal move.");
                     if (!TryAnyLegalMove(out Vector2Int fallback))
-                    {
                         Debug.LogWarning("[Go] No legal moves at all — pass.");
-                    }
                     else
                     {
                         _board.TryPlacePiece(fallback, _currentTurn);
                         Debug.Log($"[Go] Fallback move={fallback}");
                     }
-
                     LogScore("after bot (fallback)");
                     _currentTurn = _currentTurn == PieceColor.White
                         ? PieceColor.Black
@@ -87,8 +87,6 @@ public class GameSystem : MonoBehaviour
 
                 LogBotMove(search, sw.ElapsedMilliseconds);
                 LogScore("after bot");
-
-                //yield return botThinkingTime;
             }
 
             _currentTurn = _currentTurn == PieceColor.White
@@ -97,20 +95,26 @@ public class GameSystem : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Fallback: найти любой легальный ход через Board.IsLegalMove.
-    /// </summary>
     private bool TryAnyLegalMove(out Vector2Int move)
     {
-        var cells = _board.Cells;
-        var buffers = GoLogic.Buffers.Allocate(_board.FieldSize);
         Stone player = _currentTurn == PieceColor.Black ? Stone.Black : Stone.White;
+
+        // Создаём локальный массив клеток (не трогаем board напрямую).
+        int n = _board.FieldSize * _board.FieldSize;
+        Stone[] cells = new Stone[n];
+        var cellsReadonly = _board.Cells;
+        for (int i = 0; i < n; i++) cells[i] = cellsReadonly[i];
+
+        var state = GameState.Create(cells, _board.FieldSize, player);
+        state.KoPoint = _board.KoPoint;
+        state.CapturedBlack = _board.CapturedBlack;
+        state.CapturedWhite = _board.CapturedWhite;
 
         for (int y = 0; y < _board.FieldSize; y++)
         {
             for (int x = 0; x < _board.FieldSize; x++)
             {
-                if (GoLogic.IsLegalMove(cells.ToArray(), _board.FieldSize, x, y, player, ref buffers, _board.KoPoint))
+                if (GoLogic.IsLegalMove(ref state, x, y))
                 {
                     move = new Vector2Int(x, y);
                     return true;
@@ -124,7 +128,7 @@ public class GameSystem : MonoBehaviour
     private void LogScore(string label)
     {
         var b = _board.ComputeScore();
-        float blackDiff = b.Diff(Stone.Black); // + => чёрные впереди
+        float blackDiff = b.Diff(Stone.Black);
         Debug.Log(
             $"[Score:{label}] {b}\n" +
             $"        diff(black)={blackDiff:+0.0;-0.0;0.0}");
@@ -135,8 +139,7 @@ public class GameSystem : MonoBehaviour
         float second = 0f, worst = 0f;
         int secondIdx = -1, worstIdx = -1;
 
-        // Берем только ходы с достаточным числом посещений
-        var visitedMoves = r.AllMoves.Where(m => m.visits >= 10).ToList();
+        var visitedMoves = r.AllMoves.FindAll(m => m.visits >= 10);
 
         for (int i = 0; i < visitedMoves.Count; i++)
         {
