@@ -13,6 +13,8 @@ public class Board : MonoBehaviour
     private int _capturedBlack;
     private int _capturedWhite;
 
+    public GoConfig Config;
+
     public int FieldSize => _fieldSize;
     public float CellsOffset => _cellsOffset;
     public Vector3 Origin => _startCellPosition.position;
@@ -110,7 +112,7 @@ public class Board : MonoBehaviour
         state.KoPoint = _koPoint;
         state.CapturedBlack = _capturedBlack;
         state.CapturedWhite = _capturedWhite;
-        return GoScore.ComputeBreakdown(ref state);
+        return GoScore.ComputeBreakdown(ref state, Config);
     }
 
     private void OnDrawGizmos()

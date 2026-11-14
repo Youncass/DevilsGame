@@ -30,6 +30,67 @@ public static class GoLogic
         }
     }
 
+    /// <summary>
+    /// Общий BFS по группе камней. Возвращает число камней в группе,
+    /// через out-параметры — число либерти и индекс первой либерти.
+    /// stopAtFirstLiberty — прерывается при первой либерти (для GroupHasLiberty).
+    /// removeGroup — удаляет камни группы (для RemoveGroup).
+    /// </summary>
+    private static int BfsGroup(
+        ref GameState state, int startIdx, Stone player,
+        bool stopAtFirstLiberty, bool removeGroup,
+        out int liberties, out int firstLibertyIdx)
+    {
+        int size = state.Size;
+        state.Buffers.NextStamp();
+        int[] stamp = state.Buffers.VisitedStamp;
+        int[] queue = state.Buffers.Queue;
+        int cur = state.Buffers.CurrentStamp;
+
+        int head = 0, tail = 0;
+        queue[tail++] = startIdx;
+        stamp[startIdx] = cur;
+        int groupCount = 0;
+        liberties = 0;
+        firstLibertyIdx = -1;
+
+        while (head < tail)
+        {
+            int idx = queue[head++];
+            if (removeGroup)
+            {
+                state.LogCell(idx);
+                state.Cells[idx] = Stone.Empty;
+            }
+            groupCount++;
+
+            int cx = idx % size;
+            int cy = idx / size;
+
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = cx + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                int ny = cy + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
+                int nIdx = ny * size + nx;
+
+                if (state.Cells[nIdx] == Stone.Empty)
+                {
+                    liberties++;
+                    if (firstLibertyIdx < 0) firstLibertyIdx = nIdx;
+                    if (stopAtFirstLiberty) return groupCount;
+                }
+                else if (state.Cells[nIdx] == player && stamp[nIdx] != cur)
+                {
+                    stamp[nIdx] = cur;
+                    queue[tail++] = nIdx;
+                }
+            }
+        }
+
+        return groupCount;
+    }
+
     // ============================================================
     // IsLegalMove
     // ============================================================
@@ -116,6 +177,28 @@ public static class GoLogic
         return true;
     }
 
+    private static int CollectLocalMoves(ref GameState state, int lastX, int lastY,
+        Span<int> ring1, Span<int> ring2, out int c1, out int c2)
+    {
+        c1 = 0; c2 = 0;
+        int size = state.Size;
+        for (int dy = -2; dy <= 2; dy++)
+        {
+            for (int dx = -2; dx <= 2; dx++)
+            {
+                if (dx == 0 && dy == 0) continue;
+                int nx = lastX + dx;
+                int ny = lastY + dy;
+                if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
+                if (state.Cells[ny * size + nx] != Stone.Empty) continue;
+                int dist = dx * dx + dy * dy;
+                if (dist <= 2) ring1[c1++] = ny * size + nx;
+                else ring2[c2++] = ny * size + nx;
+            }
+        }
+        return c1 + c2;
+    }
+
     // ============================================================
     // GroupHasLiberty
     // ============================================================
@@ -126,37 +209,9 @@ public static class GoLogic
         int startIdx = y * size + x;
         if (state.Cells[startIdx] != player) return false;
 
-        state.Buffers.NextStamp();
-        int[] stamp = state.Buffers.VisitedStamp;
-        int[] queue = state.Buffers.Queue;
-        int cur = state.Buffers.CurrentStamp;
-
-        int head = 0, tail = 0;
-        queue[tail++] = startIdx;
-        stamp[startIdx] = cur;
-
-        while (head < tail)
-        {
-            int idx = queue[head++];
-            int cx = idx % size;
-            int cy = idx / size;
-
-            for (int d = 0; d < 4; d++)
-            {
-                int nx = cx + (d == 0 ? 1 : d == 1 ? -1 : 0);
-                int ny = cy + (d == 2 ? 1 : d == 3 ? -1 : 0);
-                if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
-                int nIdx = ny * size + nx;
-
-                if (state.Cells[nIdx] == Stone.Empty) return true;
-                if (state.Cells[nIdx] == player && stamp[nIdx] != cur)
-                {
-                    stamp[nIdx] = cur;
-                    queue[tail++] = nIdx;
-                }
-            }
-        }
-        return false;
+        BfsGroup(ref state, startIdx, player, stopAtFirstLiberty: true, removeGroup: false,
+            out int liberties, out _);
+        return liberties > 0;
     }
 
     // ============================================================
@@ -212,47 +267,13 @@ public static class GoLogic
     // ============================================================
     public static int RemoveGroup(ref GameState state, int x, int y, Stone player, out bool wasSingle)
     {
-        wasSingle = false;
         int size = state.Size;
-        if (x < 0 || x >= size || y < 0 || y >= size) return 0;
+        if (x < 0 || x >= size || y < 0 || y >= size) { wasSingle = false; return 0; }
         int startIdx = y * size + x;
-        if (state.Cells[startIdx] != player) return 0;
+        if (state.Cells[startIdx] != player) { wasSingle = false; return 0; }
 
-        state.Buffers.NextStamp();
-        int[] stamp = state.Buffers.VisitedStamp;
-        int[] queue = state.Buffers.Queue;
-        int cur = state.Buffers.CurrentStamp;
-
-        int head = 0, tail = 0;
-        queue[tail++] = startIdx;
-        stamp[startIdx] = cur;
-        int removed = 0;
-
-        while (head < tail)
-        {
-            int idx = queue[head++];
-            state.LogCell(idx);
-            state.Cells[idx] = Stone.Empty;
-            removed++;
-
-            int cx = idx % size;
-            int cy = idx / size;
-
-            for (int d = 0; d < 4; d++)
-            {
-                int nx = cx + (d == 0 ? 1 : d == 1 ? -1 : 0);
-                int ny = cy + (d == 2 ? 1 : d == 3 ? -1 : 0);
-                if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
-                int nIdx = ny * size + nx;
-
-                if (state.Cells[nIdx] == player && stamp[nIdx] != cur)
-                {
-                    stamp[nIdx] = cur;
-                    queue[tail++] = nIdx;
-                }
-            }
-        }
-
+        int removed = BfsGroup(ref state, startIdx, player, stopAtFirstLiberty: false, removeGroup: true,
+            out _, out _);
         wasSingle = removed == 1;
         return removed;
     }
@@ -373,6 +394,9 @@ public static class GoLogic
         return libs < 2;
     }
 
+    // ============================================================
+    // HasAnyGroupInAtari
+    // ============================================================
     public static bool HasAnyGroupInAtari(ref GameState state, Stone player)
     {
         int size = state.Size;
@@ -391,8 +415,13 @@ public static class GoLogic
     }
 
     // ============================================================
-    // FindAtariEscape
+    // FindAtariEscape — ПРОСТАЯ версия (для rollout)
     // ============================================================
+    /// <summary>
+    /// Ищет ход, спасающий свою группу из atari (увеличивает либерти с 1 до >=2).
+    /// Быстрая версия: смотрит только на либерти группы. Используется в rollout,
+    /// где важна скорость, а не полнота. Для корня используется FindAtariEscapeFull.
+    /// </summary>
     public static bool FindAtariEscape(ref GameState state, out int bx, out int by)
     {
         bx = -1; by = -1;
@@ -425,6 +454,127 @@ public static class GoLogic
                 return true;
             }
         }
+        return false;
+    }
+
+    // ============================================================
+    // FindAtariEscapeFull — ПОЛНАЯ версия (для корня)
+    // ============================================================
+    /// <summary>
+    /// Полная версия поиска спасения из atari: проверяет не только либерти группы,
+    /// но и ВСЕ пустые соседи её камней (соединение с другой своей группой,
+    /// захват группы противника, образование новых либерти). Для каждого кандидата
+    /// делает полный trial через ApplyMove на копии GameState с отдельным Buffers,
+    /// чтобы не портить основной state. Используется ТОЛЬКО в корне (Search),
+    /// не в rollout — там слишком дорого.
+    /// </summary>
+    public static bool FindAtariEscapeFull(ref GameState state, out int bx, out int by)
+    {
+        bx = -1; by = -1;
+        Stone player = state.PlayerToMove;
+        int size = state.Size;
+
+        for (int y0 = 0; y0 < size; y0++)
+        {
+            for (int x0 = 0; x0 < size; x0++)
+            {
+                int startIdx = y0 * size + x0;
+                if (state.Cells[startIdx] != player) continue;
+
+                int libs = CountLiberties(ref state, x0, y0, player, maxCount: 2);
+                if (libs != 1) continue;
+
+                if (!TrySaveAtariGroupFull(ref state, startIdx, player, out int sx, out int sy))
+                    continue;
+
+                bx = sx; by = sy;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static bool TrySaveAtariGroupFull(
+        ref GameState state, int startIdx, Stone player,
+        out int saveX, out int saveY)
+    {
+        saveX = -1; saveY = -1;
+        int size = state.Size;
+        int n = size * size;
+
+        // 1. Обходим группу, собираем пустых соседей (кандидатов на спасение).
+        state.Buffers.NextStamp();
+        int[] stamp = state.Buffers.VisitedStamp;
+        int[] queue = state.Buffers.Queue;
+        int cur = state.Buffers.CurrentStamp;
+
+        int head = 0, tail = 0;
+        queue[tail++] = startIdx;
+        stamp[startIdx] = cur;
+
+        Span<int> candidates = stackalloc int[4 * n];
+        Span<int> candidateMark = stackalloc int[n];
+        int candidateCount = 0;
+
+        while (head < tail)
+        {
+            int idx = queue[head++];
+            int cx = idx % size;
+            int cy = idx / size;
+
+            for (int d = 0; d < 4; d++)
+            {
+                int nx = cx + (d == 0 ? 1 : d == 1 ? -1 : 0);
+                int ny = cy + (d == 2 ? 1 : d == 3 ? -1 : 0);
+                if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
+                int nIdx = ny * size + nx;
+
+                if (state.Cells[nIdx] == Stone.Empty)
+                {
+                    if (candidateMark[nIdx] != cur)
+                    {
+                        candidateMark[nIdx] = cur;
+                        if (candidateCount < candidates.Length)
+                            candidates[candidateCount++] = nIdx;
+                    }
+                }
+                else if (state.Cells[nIdx] == player && stamp[nIdx] != cur)
+                {
+                    stamp[nIdx] = cur;
+                    queue[tail++] = nIdx;
+                }
+            }
+        }
+
+        // 2. Для каждого кандидата — полный trial на копии state.
+        for (int i = 0; i < candidateCount; i++)
+        {
+            int idx = candidates[i];
+            int x = idx % size;
+            int y = idx / size;
+
+            if (!IsLegalMove(ref state, x, y)) continue;
+
+            // Копия state: Cells клонируем, Buffers выделяем отдельный,
+            // чтобы trial не портил основной state.Buffers.
+            var trial = state;
+            trial.Cells = (Stone[])state.Cells.Clone();
+            trial.Buffers = Buffers.Allocate(size);
+            trial.SaveScalars();
+
+            if (!ApplyMove(ref trial, x, y, out _)) continue;
+
+            int newLibs = CountLiberties(ref trial, x, y, player, maxCount: 2);
+
+            // Undo не нужен: trial — локальная копия, уйдёт в GC.
+            if (newLibs >= 2)
+            {
+                saveX = x;
+                saveY = y;
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -471,13 +621,13 @@ public static class GoLogic
     // SmartRandomMove
     // ============================================================
     public static bool SmartRandomMove(ref GameState state, System.Random rng,
-    int lastX, int lastY, float localBias, MoveTechnique techniques, out int bx, out int by)
+        int lastX, int lastY, float localBias, MoveTechnique techniques, out int bx, out int by)
     {
         bx = -1; by = -1;
         int size = state.Size;
         int n = size * size;
 
-        // 0. Спасение своей группы из atari.
+        // 0. Спасение своей группы из atari (простая версия — для rollout).
         if ((techniques & MoveTechnique.SaveAtari) != 0)
         {
             if (FindAtariEscape(ref state, out int ex, out int ey))
@@ -522,24 +672,7 @@ public static class GoLogic
         {
             Span<int> ring1 = stackalloc int[8];
             Span<int> ring2 = stackalloc int[16];
-            int c1 = 0, c2 = 0;
-
-            for (int dy = -2; dy <= 2; dy++)
-            {
-                for (int dx = -2; dx <= 2; dx++)
-                {
-                    if (dx == 0 && dy == 0) continue;
-                    int nx = lastX + dx;
-                    int ny = lastY + dy;
-                    if (nx < 0 || nx >= size || ny < 0 || ny >= size) continue;
-                    if (state.Cells[ny * size + nx] != Stone.Empty) continue;
-
-                    int dist = (dx * dx + dy * dy);
-                    if (dist <= 2) ring1[c1++] = ny * size + nx;
-                    else ring2[c2++] = ny * size + nx;
-                }
-            }
-
+            CollectLocalMoves(ref state, lastX, lastY, ring1, ring2, out int c1, out int c2);
             Shuffle(ring1, c1, rng);
             Shuffle(ring2, c2, rng);
 

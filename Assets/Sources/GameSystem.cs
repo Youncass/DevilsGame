@@ -8,10 +8,8 @@ public class GameSystem : MonoBehaviour
     [SerializeField] private Camera _mainCamera;
     [SerializeField] private PieceColor _currentTurn = PieceColor.White;
 
-    [Header("Bot Settings")]
+    [SerializeField] private GoConfig _botConfig;
     [SerializeField, Min(1)] private int _botSimulations = 5000;
-    [SerializeField] private MoveTechnique _rolloutTechniques = MoveTechnique.FastRollout;
-    [SerializeField] private MoveTechnique _rootTechniques = MoveTechnique.FullRoot;
 
     private BoardRaycaster _raycaster;
     private PlayerMoveProvider _playerMoves;
@@ -21,7 +19,8 @@ public class GameSystem : MonoBehaviour
     {
         _raycaster = new BoardRaycaster(_mainCamera, _board);
         _playerMoves = new PlayerMoveProvider(_input, _raycaster);
-        _mcts = new MCTSController(_board.FieldSize);
+        _mcts = new MCTSController(_board.FieldSize, _botConfig);
+        _board.Config = _botConfig;
     }
 
     private void Start() => StartCoroutine(GameLoop());
@@ -52,8 +51,6 @@ public class GameSystem : MonoBehaviour
                     _currentTurn == PieceColor.Black ? Stone.Black : Stone.White,
                     _botSimulations,
                     _board.KoPoint,
-                    _rolloutTechniques,
-                    _rootTechniques,
                     _board.CapturedBlack,
                     _board.CapturedWhite);
 

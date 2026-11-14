@@ -2,14 +2,7 @@
 
 public static class GoScore
 {
-    public static float Komi(int boardSize) => boardSize switch
-    {
-        <= 9 => 5.5f,
-        <= 13 => 6.5f,
-        _ => 7.5f,
-    };
-
-    public static ScoreBreakdown ComputeBreakdown(ref GameState state)
+    public static ScoreBreakdown ComputeBreakdown(ref GameState state, GoConfig config)
     {
         int size = state.Size;
         int n = state.Cells.Length;
@@ -161,6 +154,8 @@ public static class GoScore
             }
         }
 
+        float influenceRange = size / config.InfluenceRangeDivisor;
+
         for (int i = 0; i < n; i++)
         {
             if (board[i] != Stone.Empty) continue;
@@ -171,7 +166,7 @@ public static class GoScore
             float dist = Mathf.Abs(v);
             float sign = Mathf.Sign(v);
 
-            if (dist <= size / 3f)
+            if (dist <= influenceRange)
             {
                 if (sign > 0) blackTerritory += 1;
                 else whiteTerritory += 1;
@@ -188,13 +183,15 @@ public static class GoScore
             CapturedWhite = state.CapturedWhite,
             AtariPenaltyBlack = atariBlack,
             AtariPenaltyWhite = atariWhite,
-            Komi = Komi(size),
+            Komi = config.GetKomi(size),
+            AtariPenaltyBase = config.AtariPenaltyBase,
+            AtariPenaltyBonus = config.AtariPenaltyBonus,
         };
     }
 
-    public static float Evaluate(ref GameState state, Stone rootPlayer)
+    public static float Evaluate(ref GameState state, Stone rootPlayer, GoConfig config)
     {
-        var b = ComputeBreakdown(ref state);
+        var b = ComputeBreakdown(ref state, config);
         return b.Diff(rootPlayer);
     }
 }
@@ -210,11 +207,13 @@ public struct ScoreBreakdown
     public int AtariPenaltyBlack;
     public int AtariPenaltyWhite;
     public float Komi;
+    public float AtariPenaltyBase;
+    public float AtariPenaltyBonus;
 
-    private static float AtariPenalty(int stones)
+    private float AtariPenalty(int stones)
     {
         if (stones <= 0) return 0f;
-        return stones * (5f + 5f / Mathf.Sqrt(stones));
+        return stones * (AtariPenaltyBase + AtariPenaltyBonus / Mathf.Sqrt(stones));
     }
 
     public float BlackTotal =>

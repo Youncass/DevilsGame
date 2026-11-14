@@ -14,17 +14,17 @@ public class MCTSController
 {
     private readonly int _boardSize;
     private readonly int _boardCells;
+    private readonly GoConfig _config;
     private readonly System.Random _rng = new();
-    private const int GraveRefThreshold = 25;
-    private const float GraveBias = 1e-4f;
 
     private readonly List<MCTSNode> _unexpandedScratch = new();
     private readonly List<int> _rolloutMovesScratch = new();
 
-    public MCTSController(int boardSize)
+    public MCTSController(int boardSize, GoConfig config)
     {
         _boardSize = boardSize;
         _boardCells = boardSize * boardSize;
+        _config = config;
     }
 
     public MoveSearchResult Search(
@@ -32,8 +32,6 @@ public class MCTSController
         Stone player,
         int simulations,
         int koPoint,
-        MoveTechnique rolloutTechniques,
-        MoveTechnique rootTechniques,
         int capturedBlack = 0,
         int capturedWhite = 0)
     {
@@ -80,7 +78,7 @@ public class MCTSController
 
             var (leaf, tref) = SelectAndExpand(root, ref simState, player);
 
-            float score = Rollout(ref simState, leaf, player, _rolloutMovesScratch, rolloutTechniques);
+            float score = Rollout(ref simState, leaf, player, _rolloutMovesScratch);
 
             // Откат всех ходов симуляции.
             simState.UndoLastMove();
@@ -117,14 +115,11 @@ public class MCTSController
         // спасает ли этот ход её? Если да — бонус; если нет — штраф.
         // Это даёт MCTS прямой сигнал: «спасай свои группы».
 
-        const int AtariSaveBonus = 50;
-        const int AtariIgnorePenalty = 30;
-
         var rootStateForCheck = rootState;
         bool rootHasAtari = GoLogic.HasAnyGroupInAtari(ref rootStateForCheck, player);
 
         int saveX = -1, saveY = -1;
-        bool hasSaveMove = rootHasAtari && GoLogic.FindAtariEscape(ref rootStateForCheck, out saveX, out saveY);
+        bool hasSaveMove = rootHasAtari && GoLogic.FindAtariEscapeFull(ref rootStateForCheck, out saveX, out saveY);
 
         // Сначала копируем реальные Visits в EffectiveVisits.
         foreach (var child in root.Children)
@@ -137,9 +132,9 @@ public class MCTSController
             {
                 bool isSaveMove = hasSaveMove && child.MoveX == saveX && child.MoveY == saveY;
                 if (isSaveMove)
-                    child.EffectiveVisits += AtariSaveBonus;
+                    child.EffectiveVisits += _config.AtariSaveBonus;
                 else
-                    child.EffectiveVisits = Mathf.Max(0, child.EffectiveVisits - AtariIgnorePenalty);
+                    child.EffectiveVisits = Mathf.Max(0, child.EffectiveVisits - _config.AtariIgnorePenalty);
             }
         }
 
@@ -178,7 +173,7 @@ public class MCTSController
 
         while (true)
         {
-            if (node.Visits > GraveRefThreshold)
+            if (node.Visits > _config.GraveRefThreshold)
                 tref = node;
 
             _unexpandedScratch.Clear();
@@ -228,7 +223,7 @@ public class MCTSController
 
                 float beta = 0f;
                 if (pAmaf > 0)
-                    beta = pAmaf / (pAmaf + child.Visits + GraveBias * pAmaf * child.Visits);
+                    beta = pAmaf / (pAmaf + child.Visits + _config.GraveBias * pAmaf * child.Visits);
 
                 float value = (1f - beta) * mean + beta * amaf;
                 if (isOpponentNode) value = -value;
@@ -249,12 +244,12 @@ public class MCTSController
         }
     }
 
-    private float Rollout(ref GameState board, MCTSNode leaf, Stone rootPlayer, List<int> movesOut, MoveTechnique techniques)
+    private float Rollout(ref GameState board, MCTSNode leaf, Stone rootPlayer, List<int> movesOut)
     {
         movesOut.Clear();
 
         int n = _boardCells;
-        int maxMoves = n + 10;
+        int maxMoves = n + _config.RolloutExtraMoves;
         int moves = 0;
 
         bool playerPassed = false;
@@ -265,8 +260,8 @@ public class MCTSController
 
         while (moves < maxMoves && !(playerPassed && opponentPassed))
         {
-            if (GoLogic.SmartRandomMove(ref board, _rng, lastX, lastY, 0f,
-                techniques, out int bx, out int by))
+            if (GoLogic.SmartRandomMove(ref board, _rng, lastX, lastY, _config.LocalBias,
+                _config.RolloutTechniques, out int bx, out int by))
             {
                 movesOut.Add(by * _boardSize + bx);
                 GoLogic.ApplyMove(ref board, bx, by, out _);
@@ -284,6 +279,6 @@ public class MCTSController
             moves++;
         }
 
-        return GoScore.Evaluate(ref board, rootPlayer);
+        return GoScore.Evaluate(ref board, rootPlayer, _config);
     }
 }

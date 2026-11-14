@@ -536,6 +536,7 @@ MonoBehaviour:
   _input: {fileID: 424579386}
   _mainCamera: {fileID: 330585545}
   _currentTurn: 2
+  _botConfig: {fileID: 11400000, guid: 03e63d985e988cd49bd5330e2c918f68, type: 2}
   _botSimulations: 5000
 --- !u!1 &832575517
 GameObject:
@@ -687,6 +688,7 @@ MonoBehaviour:
   _startCellPosition: {fileID: 851412012}
   _fieldSize: 9
   _cellsOffset: 1
+  Config: {fileID: 0}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
