@@ -16,6 +16,7 @@ public class CameraBehaviour : MonoBehaviour
     [SerializeField] private float _rotationSpeed = 0.2f;
     [SerializeField] private float _minPitch = -20f;
     [SerializeField] private float _maxPitch = 60f;
+    [SerializeField] private float time = 1f;
 
     private PlayerInput _input;
 
@@ -93,10 +94,10 @@ public class CameraBehaviour : MonoBehaviour
         _isTransitioning = true;
 
         // Позиция всегда доезжает до _point2 (вращение этому не мешает)
-        _positionTween = Tween.Position(_camera, _point2.position, 1f, Ease.OutQuad);
+        _positionTween = Tween.Position(_camera, _point2.position, time, Ease.OutQuad);
 
         // Вращение — только если пользователь не начал драг. Иначе он управляет сам.
-        _rotationTween = Tween.Rotation(_camera, _point2.rotation, 1f, Ease.OutQuad)
+        _rotationTween = Tween.Rotation(_camera, _point2.rotation, time, Ease.OutQuad)
             .OnComplete(() =>
             {
                 // Если твин дожил до конца — синхронизируем углы с финальным поворотом
@@ -120,8 +121,8 @@ public class CameraBehaviour : MonoBehaviour
 
         _isTransitioning = true;
 
-        _positionTween = Tween.Position(_camera, _point1.position, 1f, Ease.OutQuad);
-        _rotationTween = Tween.Rotation(_camera, _point1.rotation, 1f, Ease.OutQuad)
+        _positionTween = Tween.Position(_camera, _point1.position, time, Ease.OutQuad);
+        _rotationTween = Tween.Rotation(_camera, _point1.rotation, time, Ease.OutQuad)
             .OnComplete(() =>
             {
                 if (_isTransitioning)
