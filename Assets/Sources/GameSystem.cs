@@ -3,6 +3,7 @@ using UnityEngine;
 
 public class GameSystem : MonoBehaviour
 {
+    [SerializeField] private CameraBehaviour _cameraBehaviour;
     [SerializeField] private Board _board;
     [SerializeField] private PlayerInput _input;
     [SerializeField] private Camera _mainCamera;
@@ -35,6 +36,7 @@ public class GameSystem : MonoBehaviour
             {
                 Vector2Int? move = null;
                 yield return _playerMoves.WaitForMove(m => move = m);
+                yield return new WaitUntil(() => _cameraBehaviour.CurrentState == CameraBehaviour.CameraState.CloseUp);
 
                 if (move.HasValue == false || _board.TryPlacePiece(move.Value, _currentTurn) == false)
                     continue;
