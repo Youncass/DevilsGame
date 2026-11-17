@@ -292,6 +292,63 @@ public struct GoPosition
         return libs;
     }
 
+    /// <summary>
+    /// Информация о группе для анализа/триггеров.Массивы могут быть null —
+    /// тогда возвращаются только счётчики. Не изменяет позицию.
+    /// </summary>
+    public int GetGroupInfo(int start, int[] groupCells, int[] libertyCells,
+        out int groupCount, out int libertyCount)
+    {
+        groupCount = 0;
+        libertyCount = 0;
+        if (start < 0 || start >= Count || Cells[start] == Stone.Empty)
+            return 0;
+
+        Stone color = Cells[start];
+        int gstamp = NextGroupStamp();
+        int lstamp = NextLibertyStamp();
+        int[] markArr = GroupMark;
+        int[] libArr = LibertyMark;
+        int[] q = Queue;
+        int[] nb = Geometry.Neighbors;
+
+        int head = 0, tail = 0;
+        q[tail++] = start;
+        markArr[start] = gstamp;
+
+        while (head < tail)
+        {
+            int idx = q[head++];
+            if (groupCells != null && groupCount < groupCells.Length)
+                groupCells[groupCount] = idx;
+            groupCount++;
+
+            int b = idx * 4;
+            for (int d = 0; d < 4; d++)
+            {
+                int ni = nb[b + d];
+                if (ni < 0) continue;
+
+                Stone v = Cells[ni];
+                if (v == Stone.Empty)
+                {
+                    if (libArr[ni] == lstamp) continue;
+                    libArr[ni] = lstamp;
+                    if (libertyCells != null && libertyCount < libertyCells.Length)
+                        libertyCells[libertyCount] = ni;
+                    libertyCount++;
+                }
+                else if (v == color && markArr[ni] != gstamp)
+                {
+                    markArr[ni] = gstamp;
+                    q[tail++] = ni;
+                }
+            }
+        }
+
+        return groupCount;
+    }
+
     /// <summary>Удалить одну группу. Используется эвристикой мёртвых камней в конце партии.</summary>
     public int RemoveGroup(int start)
     {

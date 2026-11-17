@@ -26,6 +26,7 @@ public class Board : MonoBehaviour
 
     public event Action<Vector2Int, PieceColor> PiecePlaced;
     public event Action<IReadOnlyList<Vector2Int>, PieceColor> PiecesCaptured;
+    public event Action BoardReset;
 
     private void Awake()
     {
@@ -106,6 +107,16 @@ public class Board : MonoBehaviour
         position.CapturedBlack = _capturedBlack;
         position.CapturedWhite = _capturedWhite;
         return GoScoring.ComputeBreakdown(ref position, Config, removeDead: false);
+    }
+
+    /// <summary>Полная очистка доски для начала новой партии.</summary>
+    public void ResetBoard()
+    {
+        Array.Clear(_cells, 0, _cells.Length);
+        _koPoint = -1;
+        _capturedBlack = 0;
+        _capturedWhite = 0;
+        BoardReset?.Invoke();
     }
 
     private void OnDrawGizmos()
