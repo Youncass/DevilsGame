@@ -13,7 +13,7 @@ public class PlayerMoveProvider
         _raycaster = raycaster;
     }
 
-    public IEnumerator WaitForMove(Action<Vector2Int> onMove)
+    public IEnumerator WaitForMove(Action<Vector2Int> onMove, Func<bool> shouldPass = null)
     {
         bool clicked = false;
         Vector2 lastScreenPosition = default;
@@ -27,14 +27,14 @@ public class PlayerMoveProvider
         _input.OnClick.AddListener(OnClick);
         try
         {
-            yield return new WaitUntil(() => clicked);
+            yield return new WaitUntil(() => clicked || (shouldPass != null && shouldPass()));
         }
         finally
         {
             _input.OnClick.RemoveListener(OnClick);
         }
 
-        if (_raycaster.TryGetCell(lastScreenPosition, out Vector2Int cell))
+        if (clicked && _raycaster.TryGetCell(lastScreenPosition, out Vector2Int cell))
             onMove?.Invoke(cell);
     }
 }

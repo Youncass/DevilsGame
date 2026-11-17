@@ -5,15 +5,16 @@ using UnityEngine;
 public class Board : MonoBehaviour
 {
     [SerializeField] private Transform _startCellPosition;
-    [SerializeField, Min(1)] private int _fieldSize;
+    [SerializeField, Min(2)] private int _fieldSize;
     [SerializeField] private float _cellsOffset;
 
     private Stone[] _cells;
+    private GoGeometry _geometry;
     private int _koPoint = -1;
     private int _capturedBlack;
     private int _capturedWhite;
 
-    public GoConfig Config;
+    [HideInInspector] public GoConfig Config;
 
     public int FieldSize => _fieldSize;
     public float CellsOffset => _cellsOffset;
@@ -29,6 +30,7 @@ public class Board : MonoBehaviour
     private void Awake()
     {
         _cells = new Stone[_fieldSize * _fieldSize];
+        _geometry = GoGeometry.Get(_fieldSize);
     }
 
     public Vector3 CellToWorld(Vector2Int cell)
@@ -66,41 +68,32 @@ public class Board : MonoBehaviour
     {
         if (!IsInside(cell)) return false;
 
-        // Снимок старых клеток для события PiecesCaptured.
-        Stone[] oldCells = (Stone[])_cells.Clone();
-
         Stone player = color == PieceColor.Black ? Stone.Black : Stone.White;
-        var state = GameState.Create(_cells, _fieldSize, player);
-        state.KoPoint = _koPoint;
-        state.CapturedBlack = _capturedBlack;
-        state.CapturedWhite = _capturedWhite;
+        var position = GoPosition.Create(_cells, _fieldSize, player, _geometry);
+        position.KoPoint = _koPoint;
+        position.CapturedBlack = _capturedBlack;
+        position.CapturedWhite = _capturedWhite;
 
-        if (!GoLogic.ApplyMove(ref state, cell.x, cell.y, out int captured))
+        if (!position.Play(cell.y * _fieldSize + cell.x, out _))
             return false;
 
-        // Копируем новое состояние обратно.
-        Array.Copy(state.Cells, _cells, _cells.Length);
-        _koPoint = state.KoPoint;
-        _capturedBlack = state.CapturedBlack;
-        _capturedWhite = state.CapturedWhite;
-
-        // Собираем позиции захваченных камней.
-        var capturedPositions = new List<Vector2Int>(captured);
-        if (captured > 0)
-        {
-            int n = _cells.Length;
-            for (int i = 0; i < n; i++)
-            {
-                if (oldCells[i] != Stone.Empty && _cells[i] == Stone.Empty)
-                    capturedPositions.Add(new Vector2Int(i % _fieldSize, i / _fieldSize));
-            }
-        }
+        Array.Copy(position.Cells, _cells, _cells.Length);
+        _koPoint = position.KoPoint;
+        _capturedBlack = position.CapturedBlack;
+        _capturedWhite = position.CapturedWhite;
 
         PiecePlaced?.Invoke(cell, color);
-        if (capturedPositions.Count > 0)
+
+        if (position.CapturedCount > 0)
         {
+            var captured = new List<Vector2Int>(position.CapturedCount);
+            for (int i = 0; i < position.CapturedCount; i++)
+            {
+                int idx = position.CapturedIndices[i];
+                captured.Add(new Vector2Int(idx % _fieldSize, idx / _fieldSize));
+            }
             PieceColor capturedColor = color == PieceColor.Black ? PieceColor.White : PieceColor.Black;
-            PiecesCaptured?.Invoke(capturedPositions, capturedColor);
+            PiecesCaptured?.Invoke(captured, capturedColor);
         }
 
         return true;
@@ -108,11 +101,11 @@ public class Board : MonoBehaviour
 
     public ScoreBreakdown ComputeScore()
     {
-        var state = GameState.Create(_cells, _fieldSize, Stone.Empty);
-        state.KoPoint = _koPoint;
-        state.CapturedBlack = _capturedBlack;
-        state.CapturedWhite = _capturedWhite;
-        return GoScore.ComputeBreakdown(ref state, Config);
+        var position = GoPosition.Create(_cells, _fieldSize, Stone.Empty, _geometry);
+        position.KoPoint = _koPoint;
+        position.CapturedBlack = _capturedBlack;
+        position.CapturedWhite = _capturedWhite;
+        return GoScoring.ComputeBreakdown(ref position, Config, removeDead: false);
     }
 
     private void OnDrawGizmos()

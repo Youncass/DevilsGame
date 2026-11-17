@@ -15,15 +15,25 @@ MonoBehaviour:
   Komi9: 5.5
   Komi13: 6.5
   Komi19: 7.5
-  AtariPenaltyBase: 5
-  AtariPenaltyBonus: 5
-  GraveRefThreshold: 25
-  GraveBias: 0.0001
-  Exploration: 1.414
-  RolloutExtraMoves: 10
-  LocalBias: 0.4
-  RolloutTechniques: 113
-  RootTechniques: -1
-  AtariSaveBonus: 50
-  AtariIgnorePenalty: 30
-  InfluenceRangeDivisor: 3
+  Exploration: 1.4
+  RaveThreshold: 20
+  RaveBias: 0.00015
+  ScoreScale: 12
+  PriorWeight: 0.012
+  MinVisitsRatio: 0.04
+  RolloutExtraMoves: 12
+  LocalBias: 0.8
+  CaptureProbability: 0.95
+  AtariSaveProbability: 0.98
+  PassEmptyRatio: 0.12
+  UseEyeFilter: 1
+  UseSelfAtariFilter: 1
+  CandidateRadius: 2
+  CaptureBonus: 40
+  SaveAtariBonus: 35
+  ThreatBonus: 18
+  LocalBonus: 1.5
+  CenterBonus: 3
+  FirstLinePenalty: 9
+  SecondLinePenalty: 2
+  PassPenalty: 12
