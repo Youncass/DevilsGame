@@ -16,6 +16,7 @@ public class GameSystem : MonoBehaviour
     }
 
     [Header("References")]
+    [SerializeField] private CameraBehaviour _cameraBehaviour;
     [SerializeField] private Board _board;
     [SerializeField] private PlayerInput _input;
     [SerializeField] private Camera _mainCamera;
@@ -360,14 +361,18 @@ public class GameSystem : MonoBehaviour
 
     private void OnClick(Vector2 screenPosition)
     {
-        if (_phase != Phase.AwaitingPlayer && _phase != Phase.GameOver) return;
+        if (_phase != Phase.AwaitingPlayer &&
+            _phase != Phase.GameOver &&
+            _cameraBehaviour.CurrentState != CameraState.CloseUp) return;
         _queuedClick = screenPosition;
         _clickQueued = true;
     }
 
     private void OnPass()
     {
-        if (_phase != Phase.AwaitingPlayer && _phase != Phase.GameOver) return;
+        if (_phase != Phase.AwaitingPlayer &&
+            _phase != Phase.GameOver &&
+            _cameraBehaviour.CurrentState != CameraState.CloseUp) return;
         _passQueued = true;
     }
 
