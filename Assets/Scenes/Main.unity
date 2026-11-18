@@ -538,6 +538,9 @@ MonoBehaviour:
   _currentTurn: 2
   _botConfig: {fileID: 11400000, guid: 03e63d985e988cd49bd5330e2c918f68, type: 2}
   _botSimulations: 5000
+  _botTimeBudgetMs: 1500
+  _frameBudgetMs: 4
+  _simsPerFrame: 128
 --- !u!1 &832575517
 GameObject:
   m_ObjectHideFlags: 0
@@ -688,7 +691,7 @@ MonoBehaviour:
   _startCellPosition: {fileID: 851412012}
   _fieldSize: 9
   _cellsOffset: 1
-  Config: {fileID: 0}
+  Config: {fileID: 11400000, guid: 03e63d985e988cd49bd5330e2c918f68, type: 2}
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

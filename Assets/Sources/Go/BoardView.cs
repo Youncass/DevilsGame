@@ -23,6 +23,7 @@ public class BoardView : MonoBehaviour
     {
         _board.PiecePlaced += OnPiecePlaced;
         _board.PiecesCaptured += OnPiecesCaptured;
+        _board.BoardReset += OnBoardReset;
     }
 
     private void OnPiecePlaced(Vector2Int coordinates, PieceColor color)
@@ -51,12 +52,24 @@ public class BoardView : MonoBehaviour
         }
     }
 
+    private void OnBoardReset()
+    {
+        foreach (var pair in _spawnedPieces)
+        {
+            if (pair.Value == null) continue;
+            Tween.StopAll(pair.Value.transform);
+            Destroy(pair.Value);
+        }
+        _spawnedPieces.Clear();
+    }
+
     private void OnDestroy()
     {
         if (_board != null)
         {
             _board.PiecePlaced -= OnPiecePlaced;
             _board.PiecesCaptured -= OnPiecesCaptured;
+            _board.BoardReset -= OnBoardReset;
         }
     }
 }
