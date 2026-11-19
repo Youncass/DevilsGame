@@ -65,8 +65,16 @@ public class Board : MonoBehaviour
                world.z <= origin.z + (_fieldSize - 1) * _cellsOffset + half;
     }
 
-    public bool TryPlacePiece(Vector2Int cell, PieceColor color)
+    public bool TryPlacePiece(Vector2Int cell, PieceColor color) =>
+        TryPlacePiece(cell, color, out _);
+
+    /// <summary>
+    /// Ставит камень и отдаёт список снятых пленников (null, если захватов не было).
+    /// </summary>
+    public bool TryPlacePiece(
+        Vector2Int cell, PieceColor color, out IReadOnlyList<Vector2Int> captured)
     {
+        captured = null;
         if (!IsInside(cell)) return false;
 
         Stone player = color == PieceColor.Black ? Stone.Black : Stone.White;
@@ -87,17 +95,39 @@ public class Board : MonoBehaviour
 
         if (position.CapturedCount > 0)
         {
-            var captured = new List<Vector2Int>(position.CapturedCount);
+            var capturedCells = new List<Vector2Int>(position.CapturedCount);
             for (int i = 0; i < position.CapturedCount; i++)
             {
                 int idx = position.CapturedIndices[i];
-                captured.Add(new Vector2Int(idx % _fieldSize, idx / _fieldSize));
+                capturedCells.Add(new Vector2Int(idx % _fieldSize, idx / _fieldSize));
             }
+            captured = capturedCells;
             PieceColor capturedColor = color == PieceColor.Black ? PieceColor.White : PieceColor.Black;
-            PiecesCaptured?.Invoke(captured, capturedColor);
+            PiecesCaptured?.Invoke(capturedCells, capturedColor);
         }
 
         return true;
+    }
+
+    /// <summary>Первый легальный ход для указанного цвета — аварийный вариант для бота.</summary>
+    public bool TryAnyLegalMove(PieceColor color, out Vector2Int cell)
+    {
+        Stone player = color == PieceColor.Black ? Stone.Black : Stone.White;
+        var position = GoPosition.Create(_cells, _fieldSize, player, _geometry);
+        position.KoPoint = _koPoint;
+        position.CapturedBlack = _capturedBlack;
+        position.CapturedWhite = _capturedWhite;
+
+        int count = _fieldSize * _fieldSize;
+        for (int i = 0; i < count; i++)
+        {
+            if (!position.IsLegal(i)) continue;
+            cell = new Vector2Int(i % _fieldSize, i / _fieldSize);
+            return true;
+        }
+
+        cell = new Vector2Int(-1, -1);
+        return false;
     }
 
     public ScoreBreakdown ComputeScore()

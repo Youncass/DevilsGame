@@ -11,14 +11,13 @@ public class CameraBehaviour : MonoBehaviour
     [SerializeField] private Transform _point2;
     [SerializeField] private GameObject _zoomOutButton;
     [SerializeField] private GameObject _boardClickArea;
+    [SerializeField] private PlayerInput _input;
 
     [Header("Rotation")]
     [SerializeField] private float _rotationSpeed = 0.2f;
     [SerializeField] private float _minPitch = -20f;
     [SerializeField] private float _maxPitch = 60f;
     [SerializeField] private float time = 1f;
-
-    private PlayerInput _input;
 
     private float _yaw;
     private float _pitch;
@@ -28,18 +27,13 @@ public class CameraBehaviour : MonoBehaviour
     private Tween _rotationTween;
     private Tween _positionTween;
 
-    private void Awake()
-    {
-        _input = FindObjectOfType<PlayerInput>();
-        _input.OnDrag.AddListener(HandleDrag);
-    }
-
     private void Start()
     {
-        _camera.position = _point1.position;
-        _camera.rotation = _point1.rotation;
+        _input.OnDrag.AddListener(HandleDrag);
+
         _zoomOutButton.SetActive(true);
-        if (_boardClickArea != null) _boardClickArea.SetActive(false);
+        if (_boardClickArea != null)
+            _boardClickArea.SetActive(false);
 
         SyncAnglesFromTransform();
     }
@@ -133,6 +127,7 @@ public class CameraBehaviour : MonoBehaviour
             });
 
         _zoomOutButton.SetActive(true);
-        if (_boardClickArea != null) _boardClickArea.SetActive(false);
+        if (_boardClickArea != null)
+            _boardClickArea.SetActive(false);
     }
 }

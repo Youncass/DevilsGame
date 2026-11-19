@@ -39,6 +39,7 @@ public class PlayerInput : MonoBehaviour
                 }
             }
         }
+#endif
         for (int i = 0; i < Input.touchCount; i++)
         _pointerActive = false;
 
