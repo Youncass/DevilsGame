@@ -10,6 +10,7 @@ public class GameSystem : MonoBehaviour
     [Header("References")]
     [SerializeField] private Board _board;
     [SerializeField] private PlayerInput _input;
+    [SerializeField] private CameraBehaviour _cameraBehaviour;
     [SerializeField] private Camera _mainCamera;
     [SerializeField] private GoConfig _botConfig;
     [SerializeField] private PieceColor _playerColor = PieceColor.White;
@@ -37,6 +38,9 @@ public class GameSystem : MonoBehaviour
 
     private void Start()
     {
+        if (_cameraBehaviour == null)
+            _cameraBehaviour = FindAnyObjectByType<CameraBehaviour>();
+
         GoConfig config = _botConfig;
         if (config == null)
         {
@@ -102,7 +106,14 @@ public class GameSystem : MonoBehaviour
         }
     }
 
-    private void OnClick(Vector2 screenPosition) => _loop?.QueueClick(screenPosition);
+    private void OnClick(Vector2 screenPosition)
+    {
+        // В обзоре доска не принимает клики — камера там только вращается.
+        if (_cameraBehaviour != null && !_cameraBehaviour.IsBoardInteractive)
+            return;
+
+        _loop?.QueueClick(screenPosition);
+    }
 
     private void OnPass() => _loop?.QueuePass();
 

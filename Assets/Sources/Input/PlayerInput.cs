@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.EventSystems;
 
 public class PlayerInput : MonoBehaviour
 {
@@ -19,12 +20,11 @@ public class PlayerInput : MonoBehaviour
     private bool _isPressing;
     private bool _isDragging;
     private bool _pointerActive; // true если в этом кадре уже обработали мышь ИЛИ тач (защита от двойного события)
+    private int _pointerId = -1; // -1 — мышь, иначе fingerId
 
     private void Update()
     {
 #if UNITY_EDITOR || UNITY_STANDALONE
-        if (Input.GetKeyDown(KeyCode.Mouse0))
-            OnClick.Invoke(Input.mousePosition);
         if (Input.GetKeyDown(KeyCode.P))
             OnPass.Invoke();
 #else
@@ -40,7 +40,6 @@ public class PlayerInput : MonoBehaviour
             }
         }
 #endif
-        for (int i = 0; i < Input.touchCount; i++)
         _pointerActive = false;
 
         HandleTouch(); // на мобилке — приоритет тачу
@@ -48,8 +47,17 @@ public class PlayerInput : MonoBehaviour
             HandleMouse(); // на ПК — мышь
     }
 
-    private void BeginPress(Vector2 position)
+    private void BeginPress(Vector2 position, int pointerId)
     {
+        // Нажатие началось на UI — доска его не получает (ни клик, ни драг).
+        if (IsPointerOverUi(pointerId))
+        {
+            _isPressing = false;
+            _isDragging = false;
+            return;
+        }
+
+        _pointerId = pointerId;
         _pressPosition = position;
         _lastPosition = position;
         _isPressing = true;
@@ -81,16 +89,27 @@ public class PlayerInput : MonoBehaviour
 
         _isPressing = false;
 
-        if (!_isDragging)
+        if (!_isDragging && !IsPointerOverUi(_pointerId))
             OnClick.Invoke(position);
 
         _isDragging = false;
+        _pointerId = -1;
+    }
+
+    private static bool IsPointerOverUi(int pointerId)
+    {
+        EventSystem system = EventSystem.current;
+        if (system == null) return false;
+
+        return pointerId < 0
+            ? system.IsPointerOverGameObject()
+            : system.IsPointerOverGameObject(pointerId);
     }
 
     private void HandleMouse()
     {
         if (Input.GetMouseButtonDown(0))
-            BeginPress(Input.mousePosition);
+            BeginPress(Input.mousePosition, -1);
 
         if (Input.GetMouseButton(0))
             UpdatePress(Input.mousePosition);
@@ -108,7 +127,7 @@ public class PlayerInput : MonoBehaviour
         switch (touch.phase)
         {
             case TouchPhase.Began:
-                BeginPress(touch.position);
+                BeginPress(touch.position, touch.fingerId);
                 break;
             case TouchPhase.Moved:
             case TouchPhase.Stationary:
@@ -121,6 +140,7 @@ public class PlayerInput : MonoBehaviour
                 _pointerActive = true;
                 _isPressing = false;
                 _isDragging = false;
+                _pointerId = -1;
                 break;
         }
     }
