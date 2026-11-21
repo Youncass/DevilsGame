@@ -74,6 +74,9 @@ public sealed class Board : MonoBehaviour
     public bool TryAnyLegalMove(PieceColor color, out Vector2Int cell) =>
         _state.TryAnyLegal(color, out cell);
 
+    /// <summary>Пас снимает запрет ко, как и в правилах позиции.</summary>
+    public void Pass() => _state.Pass();
+
     public ScoreBreakdown ComputeScore() => _state.ComputeScore(Config);
 
     /// <summary>Полная очистка доски для начала новой партии.</summary>

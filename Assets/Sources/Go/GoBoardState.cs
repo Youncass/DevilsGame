@@ -43,6 +43,9 @@ public sealed class GoBoardState
         cell.x >= 0 && cell.x < _size &&
         cell.y >= 0 && cell.y < _size;
 
+    /// <summary>Пас снимает запрет ко: следующий ход может вернуть точку.</summary>
+    public void Pass() => _koPoint = -1;
+
     /// <summary>
     /// Ставит камень и отдаёт список снятых пленников (null, если захватов не было).
     /// </summary>

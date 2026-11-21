@@ -194,6 +194,7 @@ public sealed class MatchLoop
 
     private void RegisterPass(string who)
     {
+        _board.Pass();
         _consecutivePasses++;
         MatchLog.Pass(who, _consecutivePasses);
         MoveToOpponent();

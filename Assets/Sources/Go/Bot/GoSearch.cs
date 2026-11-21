@@ -68,7 +68,7 @@ internal sealed class GoNode
     public int ChildCount;
 
     public readonly int Move;         // индекс пункта; Count = пас
-    public readonly Stone PlayerToMove;
+    public readonly Stone PlayerToMove; // кто ходит из этой позиции
     public readonly float Prior;
 
     public int Visits;
@@ -105,7 +105,7 @@ public sealed class MCTSController
     private GoPosition _root;
     private Stone _rootPlayer;
     private GoNode _rootNode;
-    private GoNode _tref;
+    private int _maxDepth;
 
     private int[] _movesScratch;
     private float[] _priorsScratch;
@@ -113,7 +113,6 @@ public sealed class MCTSController
     private GoNode[] _path;
     private int _pathLength;
 
-    private GoNode[] _recordNode;
     private int[] _recordMove;
     private Stone[] _recordPlayer;
     private int _recordCount;
@@ -143,7 +142,6 @@ public sealed class MCTSController
         _movesScratch = new int[_count + 1];
         _priorsScratch = new float[_count + 1];
         _path = new GoNode[2 * _count + 16];
-        _recordNode = new GoNode[2 * _count + 16];
         _recordMove = new int[2 * _count + 16];
         _recordPlayer = new Stone[2 * _count + 16];
         int rolloutCapacity = _count + Math.Max(64, config.RolloutExtraMoves + 8);
@@ -153,6 +151,7 @@ public sealed class MCTSController
 
     public bool IsDone => _done;
     public int SimulationsDone => _simulationsDone;
+    public int MaxDepth => _maxDepth;
 
     public MoveSearchResult Result => _done ? _result : BuildResult();
 
@@ -194,6 +193,7 @@ public sealed class MCTSController
 
         _maxSimulations = Math.Max(0, simulations);
         _simulationsDone = 0;
+        _maxDepth = 0;
         _elapsedTicks = 0;
         _frameTicks = Math.Max(1, (long)(TimeSpan.TicksPerMillisecond * Math.Max(0.25f, frameBudgetMs)));
         _totalTicks = timeBudgetMs > 0f
@@ -259,7 +259,6 @@ public sealed class MCTSController
         GoPosition sim = _root;       // массивы общие, Undo() всё вернёт
         sim.BeginSimulation();
 
-        _tref = _rootNode;
         _recordCount = 0;
         _rolloutCount = 0;
         _pathLength = 0;
@@ -269,31 +268,33 @@ public sealed class MCTSController
 
         float score = Rollout(ref sim, leaf.Move);
         float reward = RewardFromScore(score);
+        if (_pathLength - 1 > _maxDepth) _maxDepth = _pathLength - 1;
 
-        for (int i = 0; i < _pathLength; i++)
+        for (int depth = 0; depth < _pathLength; depth++)
         {
-            GoNode node = _path[i];
+            GoNode node = _path[depth];
             node.Visits++;
             node.TotalReward += reward;
             node.TotalScore += score;
-        }
 
-        if (_tref.Amaf == null) _tref.Amaf = new GoAmaf(_count);
+            GoAmaf amaf = node.Amaf;
+            if (amaf == null) continue;
 
-        for (int i = 0; i < _recordCount; i++)
-        {
-            int move = _recordMove[i];
-            if (move >= _count) continue;
-            Stone player = _recordPlayer[i];
-            _tref.Amaf.Add(player, move, reward);
-            if (_recordNode[i].Amaf != null)
-                _recordNode[i].Amaf.Add(player, move, reward);
-        }
-        for (int i = 0; i < _rolloutCount; i++)
-        {
-            int move = _rolloutMove[i];
-            if (move >= _count) continue;
-            _tref.Amaf.Add(_rolloutPlayer[i], move, reward);
+            // RAVE узла считает только ходы, сыгранные после него:
+            // глубже по пути и в rollout.
+            for (int i = depth; i < _recordCount; i++)
+            {
+                int move = _recordMove[i];
+                if (move >= _count) continue;
+                amaf.Add(_recordPlayer[i], move, reward);
+            }
+
+            for (int i = 0; i < _rolloutCount; i++)
+            {
+                int move = _rolloutMove[i];
+                if (move >= _count) continue;
+                amaf.Add(_rolloutPlayer[i], move, reward);
+            }
         }
 
         sim.Undo();
@@ -307,8 +308,6 @@ public sealed class MCTSController
         {
             if (node.Visits >= _config.RaveThreshold && node.Amaf == null)
                 node.Amaf = new GoAmaf(_count);
-            if (node.Amaf != null)
-                _tref = node;
 
             if (node.UntriedCount > 0)
             {
@@ -321,10 +320,16 @@ public sealed class MCTSController
                 node.UntriedPrior[pick] = node.UntriedPrior[last];
                 node.UntriedCount--;
 
-                var child = new GoNode(move, node.PlayerToMove, prior);
+                // Ребёнок — позиция после хода, поэтому из неё ходит противник.
+                var child = new GoNode(move, GoRules.Opp(node.PlayerToMove), prior);
                 AddChild(node, child);
                 PlayTreeMove(ref sim, node, move);
                 _path[_pathLength++] = child;
+
+                // Раскрываем только после хода камнем: ветку паса доигрывает rollout.
+                if (move < _count)
+                    GenerateMoves(child, ref sim);
+
                 return child;
             }
 
@@ -351,7 +356,6 @@ public sealed class MCTSController
         if (move >= _count) sim.Pass();
         else sim.Play(move, out _);
 
-        _recordNode[_recordCount] = node;
         _recordMove[_recordCount] = move;
         _recordPlayer[_recordCount] = player;
         _recordCount++;
@@ -373,7 +377,7 @@ public sealed class MCTSController
     private GoNode SelectChild(GoNode node)
     {
         double logN = Math.Log(node.Visits + 1.0);
-        GoAmaf amaf = node.Amaf ?? _tref.Amaf;
+        GoAmaf amaf = node.Amaf;
         Stone mover = node.PlayerToMove;
 
         GoNode best = null;

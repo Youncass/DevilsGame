@@ -16,6 +16,7 @@ public static class GoBotSelfTest
         var cfg = ScriptableObject.CreateInstance<GoConfig>();
 
         TestCaptureAndKo();
+        TestBoardStateKoPass();
         TestEye();
         TestSearch(cfg);
         TestDifficultyProfile();
@@ -58,6 +59,33 @@ public static class GoBotSelfTest
         Check(pos.IsLegal(Idx(size, 2, 2)), "recapture legal after pass");
     }
 
+    private static void TestBoardStateKoPass()
+    {
+        const int size = 9;
+        var state = new GoBoardState(size);
+
+        // Та же форма ко, что и в TestCaptureAndKo, но через состояние доски.
+        state.TryPlay(new Vector2Int(1, 2), PieceColor.Black, out _);
+        state.TryPlay(new Vector2Int(2, 1), PieceColor.Black, out _);
+        state.TryPlay(new Vector2Int(2, 3), PieceColor.Black, out _);
+        state.TryPlay(new Vector2Int(2, 2), PieceColor.White, out _);
+        state.TryPlay(new Vector2Int(4, 2), PieceColor.White, out _);
+        state.TryPlay(new Vector2Int(3, 1), PieceColor.White, out _);
+        state.TryPlay(new Vector2Int(3, 3), PieceColor.White, out _);
+
+        bool captured = state.TryPlay(new Vector2Int(3, 2), PieceColor.Black, out var taken);
+        Check(captured && taken != null && taken.Count == 1,
+            "board state: ko capture removes one stone");
+        Check(state.KoPoint == Idx(size, 2, 2), "board state: ko point set");
+        Check(!state.TryPlay(new Vector2Int(2, 2), PieceColor.White, out _),
+            "board state: immediate recapture forbidden");
+
+        state.Pass();
+        Check(state.KoPoint == -1, "board state: pass clears ko");
+        Check(state.TryPlay(new Vector2Int(2, 2), PieceColor.White, out _),
+            "board state: recapture legal after pass");
+    }
+
     private static void TestEye()
     {
         const int size = 5;
@@ -80,6 +108,7 @@ public static class GoBotSelfTest
 
         Check(result.BestMove.x >= 0 && result.BestMove.x < size, "search returns a point on the board");
         Check(result.Simulations == 200, "simulation budget respected");
+        Check(controller.MaxDepth > 1, "tree expands deeper than the root");
         Debug.Log($"[GoBotSelfTest] 200 sims in {sw.ElapsedMilliseconds} ms, best = {result.BestMove}");
     }
 
