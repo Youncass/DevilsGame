@@ -33,17 +33,15 @@ public sealed class GoTutorialTriggers
 
     public void OnMove(Board board, PieceColor mover, Vector2Int move, IReadOnlyList<Vector2Int> captured)
     {
-        if (board == null || board.Cells == null) return;
+        // Подсказки нужны только в первых партиях: не копируем доску, если они выключены.
+        if (!_enabled || board == null) return;
 
         int size = board.FieldSize;
-        var cells = new Stone[size * size];
-        for (int i = 0; i < cells.Length; i++) cells[i] = board.Cells[i];
-
-        OnMove(cells, size, board.KoPoint, board.Config, mover, move, captured);
+        OnMove(board.Cells, size, board.KoPoint, board.Config, mover, move, captured);
     }
 
     /// <summary>Тестовый/универсальный вход без MonoBehaviour-доски.</summary>
-    public void OnMove(Stone[] cells, int size, int koPoint, GoConfig config,
+    public void OnMove(IReadOnlyList<Stone> cells, int size, int koPoint, GoConfig config,
         PieceColor mover, Vector2Int move, IReadOnlyList<Vector2Int> captured)
     {
         if (!_enabled || cells == null) return;

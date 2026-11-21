@@ -1,6 +1,6 @@
 ﻿using UnityEngine;
 
-public class BoardRaycaster
+public sealed class BoardRaycaster
 {
     private readonly Camera _camera;
     private readonly Board _board;

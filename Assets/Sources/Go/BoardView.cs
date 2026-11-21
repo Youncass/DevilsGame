@@ -2,7 +2,7 @@
 using UnityEngine;
 using PrimeTween;
 
-public class BoardView : MonoBehaviour
+public sealed class BoardView : MonoBehaviour
 {
     [SerializeField] private Board _board;
     [SerializeField] private GameObject _whitePiecePrefab;

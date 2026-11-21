@@ -93,7 +93,7 @@ internal sealed class GoNode
 /// MCTS с UCT + RAVE. Поиск можно разбивать по кадрам: Begin -> Step(batch) ...
 /// Синхронный Search() оставлен для тестов и вызовов вне main loop.
 /// </summary>
-public class MCTSController
+public sealed class MCTSController
 {
     private readonly int _size;
     private readonly int _count;
