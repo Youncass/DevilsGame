@@ -1,138 +1,134 @@
+using System;
 using UnityEngine;
 using PrimeTween;
 
 public class CameraBehaviour : MonoBehaviour
 {
     public enum CameraState { CloseUp, ZoomedOut }
-    public CameraState CurrentState { get; private set; } = CameraState.CloseUp;
 
-    [SerializeField] private Transform _camera;
+    [Header("References")]
+    [SerializeField] private PlayerInput _input;
     [SerializeField] private Transform _point1;
     [SerializeField] private Transform _point2;
-    [SerializeField] private GameObject _zoomOutButton;
-    [SerializeField] private GameObject _boardClickArea;
 
-    [Header("Rotation")]
+    [Header("Orbit")]
     [SerializeField] private float _rotationSpeed = 0.2f;
     [SerializeField] private float _minPitch = -20f;
     [SerializeField] private float _maxPitch = 60f;
-    [SerializeField] private float time = 1f;
 
-    private PlayerInput _input;
+    [Header("Transition")]
+    [SerializeField, Min(0.01f)] private float _transitionDuration = 0.5f;
 
     private float _yaw;
     private float _pitch;
     private bool _isTransitioning;
+    private CameraState _currentState = CameraState.CloseUp;
 
-    // Хэндлы активных твинов (rotation для прерывания, position для отмены)
     private Tween _rotationTween;
     private Tween _positionTween;
 
+    public CameraState CurrentState => _currentState;
+
+    public bool IsBoardInteractive => _currentState == CameraState.CloseUp && !_isTransitioning;
+
+    public event Action<CameraState> StateChanged;
+
     private void Awake()
     {
-        _input = FindObjectOfType<PlayerInput>();
-        _input.OnDrag.AddListener(HandleDrag);
+        if (!ValidateReferences())
+        {
+            enabled = false;
+            return;
+        }
     }
 
     private void Start()
     {
-        _camera.position = _point1.position;
-        _camera.rotation = _point1.rotation;
-        _zoomOutButton.SetActive(true);
-        if (_boardClickArea != null) _boardClickArea.SetActive(false);
+        _input.OnDrag.AddListener(HandleDrag);
+    }
 
+    private bool ValidateReferences()
+    {
+        if (_point1 == null) Debug.LogError("[Camera] РќРµ РЅР°Р·РЅР°С‡РµРЅ _point1", this);
+        if (_point2 == null) Debug.LogError("[Camera] РќРµ РЅР°Р·РЅР°С‡РµРЅ _point2", this);
+
+        return _point1 != null && _point2 != null;
+    }
+
+    public void ZoomOut() => TransitionTo(CameraState.ZoomedOut);
+
+    public void ZoomIn() => TransitionTo(CameraState.CloseUp);
+
+    private void TransitionTo(CameraState target)
+    {
+        if (_currentState == target)
+            return;
+
+        Transform point = target == CameraState.ZoomedOut ? _point2 : _point1;
+
+        _currentState = target;
+        StateChanged?.Invoke(target);
+        Debug.Log($"[Camera] {target}", this);
+
+        _positionTween.Stop();
+        _rotationTween.Stop();
+
+        _isTransitioning = true;
+        _positionTween = Tween.Position(transform, point.position, _transitionDuration, Ease.OutQuad);
+        _rotationTween = Tween.Rotation(transform, point.rotation, _transitionDuration, Ease.OutQuad)
+            .OnComplete(FinishTransition);
+    }
+
+    private void FinishTransition()
+    {
+        _isTransitioning = false;
         SyncAnglesFromTransform();
-    }
-
-    private void SyncAnglesFromTransform()
-    {
-        Vector3 e = _camera.eulerAngles;
-        _yaw = e.y;
-        _pitch = NormalizeAngle(e.x);
-    }
-
-    private static float NormalizeAngle(float a)
-    {
-        a %= 360f;
-        if (a > 180f) a -= 360f;
-        return a;
     }
 
     private void HandleDrag(Vector2 frameDelta)
     {
-        if (CurrentState != CameraState.ZoomedOut) return;
+        if (_currentState != CameraState.ZoomedOut)
+            return;
 
-        // Если летит rotation-твин — прерываем его и подхватываем текущий угол.
-        // Дальше камера ведётся вручную от того места, где твин остановился.
         if (_isTransitioning)
-            InterruptRotationTween();
+        {
+            _rotationTween.Stop();
+            _isTransitioning = false;
+            SyncAnglesFromTransform();
+        }
 
         _yaw += frameDelta.x * _rotationSpeed;
-        _pitch -= frameDelta.y * _rotationSpeed;
-        _pitch = Mathf.Clamp(_pitch, _minPitch, _maxPitch);
+        _pitch = Mathf.Clamp(_pitch - frameDelta.y * _rotationSpeed, _minPitch, _maxPitch);
 
-        _camera.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+        transform.rotation = Quaternion.Euler(_pitch, _yaw, 0f);
     }
 
-    private void InterruptRotationTween()
+    private void SyncAnglesFromTransform()
     {
-        if (_rotationTween.isAlive)
-            _rotationTween.Stop();
+        Vector3 e = transform.eulerAngles;
+        _yaw = e.y;
+        _pitch = NormalizeAngle(e.x);
 
-        // Подхватываем текущий (промежуточный) угол камеры в _yaw/_pitch
-        SyncAnglesFromTransform();
-        _isTransitioning = false;
+
+        static float NormalizeAngle(float angle)
+        {
+            angle %= 360f;
+            if (angle > 180f) angle -= 360f;
+            return angle;
+        }
     }
 
-    public void ZoomOut()
+    private void OnDestroy()
     {
-        if (CurrentState == CameraState.ZoomedOut) return;
-        CurrentState = CameraState.ZoomedOut;
-        _zoomOutButton.SetActive(false);
-        if (_boardClickArea != null) _boardClickArea.SetActive(true);
-
-        _isTransitioning = true;
-
-        // Позиция всегда доезжает до _point2 (вращение этому не мешает)
-        _positionTween = Tween.Position(_camera, _point2.position, time, Ease.OutQuad);
-
-        // Вращение — только если пользователь не начал драг. Иначе он управляет сам.
-        _rotationTween = Tween.Rotation(_camera, _point2.rotation, time, Ease.OutQuad)
-            .OnComplete(() =>
-            {
-                // Если твин дожил до конца — синхронизируем углы с финальным поворотом
-                if (_isTransitioning)
-                {
-                    SyncAnglesFromTransform();
-                    _isTransitioning = false;
-                }
-            });
+        if (_input)
+            _input.OnDrag.RemoveListener(HandleDrag);
     }
 
-    public void ZoomIn()
-    {
-        if (CurrentState == CameraState.CloseUp) return;
-        CurrentState = CameraState.CloseUp;
+#if UNITY_EDITOR
+    [ContextMenu("Zoom In")]
+    private void ZoomIn_Inspector() => transform.SetPositionAndRotation(_point1.position, _point1.rotation);
 
-        // Если пользователь всё ещё вращает в момент возврата — прерываем rotation,
-        // чтобы твин возврата взял управление с текущего угла, а не с «планового».
-        if (_isTransitioning)
-            InterruptRotationTween();
-
-        _isTransitioning = true;
-
-        _positionTween = Tween.Position(_camera, _point1.position, time, Ease.OutQuad);
-        _rotationTween = Tween.Rotation(_camera, _point1.rotation, time, Ease.OutQuad)
-            .OnComplete(() =>
-            {
-                if (_isTransitioning)
-                {
-                    SyncAnglesFromTransform();
-                    _isTransitioning = false;
-                }
-            });
-
-        _zoomOutButton.SetActive(true);
-        if (_boardClickArea != null) _boardClickArea.SetActive(false);
-    }
+    [ContextMenu("Zoom Out")]
+    private void ZoomOut_Inspector() => transform.SetPositionAndRotation(_point2.position, _point2.rotation);
+#endif
 }

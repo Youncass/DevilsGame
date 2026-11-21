@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 /// <summary>
 /// Геометрия доски. Создаётся один раз на размер доски и переиспользуется всеми
@@ -104,16 +105,17 @@ public struct GoPosition
     public int[] CapturedIndices;
     public int CapturedCount;
 
-    public static GoPosition Create(Stone[] sourceCells, int size, Stone sideToMove, GoGeometry geometry = null)
+    public static GoPosition Create(IReadOnlyList<Stone> sourceCells, int size, Stone sideToMove, GoGeometry geometry = null)
     {
         geometry ??= GoGeometry.Get(size);
         int n = geometry.Count;
+        int sourceLength = sourceCells?.Count ?? 0;
 
         var cells = new Stone[n];
         int black = 0, white = 0, empty = 0;
         for (int i = 0; i < n; i++)
         {
-            cells[i] = i < sourceCells.Length ? sourceCells[i] : Stone.Empty;
+            cells[i] = i < sourceLength ? sourceCells[i] : Stone.Empty;
             if (cells[i] == Stone.Black) black++;
             else if (cells[i] == Stone.White) white++;
             else empty++;
