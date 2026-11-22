@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
-using UnityEngine;
 
 public struct GoSkillSnapshot
 {
@@ -22,38 +21,26 @@ public struct GoSkillSnapshot
 /// <summary>
 /// Уровень игрока по результатам нескольких партий. Пол ("уже побеждённый уровень")
 /// не даёт сложности опуститься ниже того, что игрок уже обыграл.
+/// Хранение вынесено в IGoSaveStore, по умолчанию — PlayerPrefs.
 /// </summary>
 public sealed class GoSkillTracker
 {
     public const int MaxLevel = 8;
-    private const int HistoryWindow = 3;
+    public const int HistoryWindow = 3;
     private const int PromotionWins = 2;
     private const int DemotionLosses = 2;
 
-    private const string DefaultKeyPrefix = "Go.Skill";
-    private const string KeyLevel = "Level";
-    private const string KeyFloor = "Floor";
-    private const string KeyGames = "RankedGames";
-    private const string KeyHistory = "History";
-    private const string KeyTutorial = "TutorialDone";
-
-    private readonly string _prefixLevel;
-    private readonly string _prefixFloor;
-    private readonly string _prefixGames;
-    private readonly string _prefixHistory;
-    private readonly string _prefixTutorial;
+    private readonly IGoSaveStore _store;
     private readonly List<bool> _recent = new();
 
-    public GoSkillTracker(string keyPrefix = DefaultKeyPrefix)
+    public GoSkillTracker(string keyPrefix = PlayerPrefsGoSaveStore.DefaultKeyPrefix)
+        : this(new PlayerPrefsGoSaveStore(keyPrefix))
     {
-        if (string.IsNullOrEmpty(keyPrefix)) keyPrefix = DefaultKeyPrefix;
-        if (!keyPrefix.EndsWith(".", StringComparison.Ordinal)) keyPrefix += ".";
+    }
 
-        _prefixLevel = keyPrefix + KeyLevel;
-        _prefixFloor = keyPrefix + KeyFloor;
-        _prefixGames = keyPrefix + KeyGames;
-        _prefixHistory = keyPrefix + KeyHistory;
-        _prefixTutorial = keyPrefix + KeyTutorial;
+    public GoSkillTracker(IGoSaveStore store)
+    {
+        _store = store ?? throw new ArgumentNullException(nameof(store));
     }
 
     public int Level { get; private set; } = 1;
@@ -89,15 +76,16 @@ public sealed class GoSkillTracker
 
     public void Load()
     {
-        TutorialCompleted = PlayerPrefs.GetInt(_prefixTutorial, 0) == 1;
-        Level = ClampInt(PlayerPrefs.GetInt(_prefixLevel, 1), 1, MaxLevel);
-        HighestDefeatedLevel = ClampInt(PlayerPrefs.GetInt(_prefixFloor, 0), 0, Level);
-        RankedGames = Math.Max(0, PlayerPrefs.GetInt(_prefixGames, 0));
+        GoSkillSave save = _store.Load();
+
+        TutorialCompleted = save.TutorialCompleted;
+        Level = ClampInt(save.Level, 1, MaxLevel);
+        HighestDefeatedLevel = ClampInt(save.HighestDefeatedLevel, 0, Level);
+        RankedGames = Math.Max(0, save.RankedGames);
 
         _recent.Clear();
-        string raw = PlayerPrefs.GetString(_prefixHistory, "");
-        for (int i = 0; i < raw.Length && _recent.Count < HistoryWindow; i++)
-            _recent.Add(raw[i] == '1');
+        for (int i = 0; i < save.History.Length && _recent.Count < HistoryWindow; i++)
+            _recent.Add(save.History[i] == '1');
 
         Changed?.Invoke(Snapshot);
     }
@@ -150,12 +138,7 @@ public sealed class GoSkillTracker
 
     public void ResetAll()
     {
-        PlayerPrefs.DeleteKey(_prefixLevel);
-        PlayerPrefs.DeleteKey(_prefixFloor);
-        PlayerPrefs.DeleteKey(_prefixGames);
-        PlayerPrefs.DeleteKey(_prefixHistory);
-        PlayerPrefs.DeleteKey(_prefixTutorial);
-        PlayerPrefs.Save();
+        _store.Clear();
 
         Level = 1;
         HighestDefeatedLevel = 0;
@@ -173,15 +156,11 @@ public sealed class GoSkillTracker
 
     private void Save()
     {
-        PlayerPrefs.SetInt(_prefixLevel, Level);
-        PlayerPrefs.SetInt(_prefixFloor, HighestDefeatedLevel);
-        PlayerPrefs.SetInt(_prefixGames, RankedGames);
-        PlayerPrefs.SetInt(_prefixTutorial, TutorialCompleted ? 1 : 0);
+        var history = new StringBuilder(_recent.Count);
+        for (int i = 0; i < _recent.Count; i++) history.Append(_recent[i] ? '1' : '0');
 
-        var sb = new StringBuilder(_recent.Count);
-        for (int i = 0; i < _recent.Count; i++) sb.Append(_recent[i] ? '1' : '0');
-        PlayerPrefs.SetString(_prefixHistory, sb.ToString());
-        PlayerPrefs.Save();
+        _store.Save(new GoSkillSave(
+            Level, HighestDefeatedLevel, RankedGames, TutorialCompleted, history.ToString()));
     }
 
     private static int ClampInt(int value, int min, int max) =>
