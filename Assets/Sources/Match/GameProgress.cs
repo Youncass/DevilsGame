@@ -12,10 +12,10 @@ public sealed class GameProgress
     private readonly GoSkillTracker _skill;
     private readonly GoTutorialTriggers _triggers;
 
-    public GameProgress(GoDifficultyProfile difficulty)
+    public GameProgress(GoDifficultyProfile difficulty, IGoSaveStore saveStore = null)
     {
         _difficulty = difficulty ?? new GoDifficultyProfile();
-        _skill = new GoSkillTracker();
+        _skill = new GoSkillTracker(saveStore ?? new PlayerPrefsGoSaveStore());
         _skill.Changed += s => SkillChanged?.Invoke(s);
 
         _triggers = new GoTutorialTriggers(_difficulty);
